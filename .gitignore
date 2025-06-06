@@ -1,0 +1,20 @@
+# Dépendances
+node_modules
+
+# Fichiers de build (TypeScript -> JavaScript)
+lib/
+
+# Fichiers d'environnement locaux
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Fichiers système
+.DS_Store
+Thumbs.db
