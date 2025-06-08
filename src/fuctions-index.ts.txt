@@ -1,0 +1,401 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable max-len */
+import { onCall } from "firebase-functions/v2/https";
+import * as functionsV1 from "firebase-functions/v1";
+import * as logger from "firebase-functions/logger";
+import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
+
+admin.initializeApp();
+
+// =================================================================
+//                    INTERFACES ET TYPES
+// =================================================================
+interface QuestStep {
+  description: string;
+  objective: string;
+  completed: boolean;
+}
+
+interface Quest {
+  questId: string;
+  title: string;
+  currentStep: number;
+  steps: QuestStep[];
+}
+
+interface ReviewItem {
+  id: string;
+  lastReviewed: admin.firestore.Timestamp;
+  correctStreak: number;
+}
+
+
+// =================================================================
+//                    FONCTIONS UTILITAIRES INTERNES
+// =================================================================
+
+/**
+ * Met à jour un objet de quête en marquant une étape comme terminée.
+ * @param {Quest} quest L'objet de quête du joueur.
+ * @param {number} stepIndex L'index de l'étape à compléter.
+ * @return {Quest} Le nouvel objet de quête mis à jour.
+ */
+function completeQuestStep(quest: Quest, stepIndex: number): Quest {
+  const newSteps = [...quest.steps];
+  newSteps[stepIndex] = { ...newSteps[stepIndex], completed: true };
+  return {
+    ...quest,
+    steps: newSteps,
+    currentStep: quest.currentStep + 1,
+  };
+}
+
+
+// =================================================================
+//                    GESTION DES UTILISATEURS ET PROFILS
+// =================================================================
+
+export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (user) => {
+  const { uid, email } = user;
+  if (!email) {
+    logger.info(`Utilisateur anonyme ${uid} créé, pas de profil nécessaire.`);
+    return null;
+  }
+  const userProfile = {
+    email: email,
+    pseudo: email.split("@")[0],
+    level: 1,
+    xp: 0,
+    manaCurrent: 100,
+    manaMax: 100,
+    fragments: { vocab: 0, grammar: 0, culture: 0 },
+    createdAt: FieldValue.serverTimestamp(),
+  };
+  await admin.firestore().collection("users").doc(uid).set(userProfile);
+  return null;
+});
+
+export const updateUserProfile = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { pseudo } = request.data;
+  const { uid } = request.auth;
+  if (typeof pseudo !== "string" || pseudo.length < 3 || pseudo.length > 20) {
+    throw new functionsV1.https.HttpsError("invalid-argument", "Le pseudo doit contenir entre 3 et 20 caractères.");
+  }
+  await admin.firestore().collection("users").doc(uid).update({ pseudo });
+  return { status: "succès" };
+});
+
+
+// =================================================================
+//                    GESTION DU LOBBY ET DES PARTIES
+// =================================================================
+
+export const createGame = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { uid } = request.auth;
+  const existingGamesQuery = admin.firestore().collection("games").where("hostId", "==", uid).where("status", "==", "waiting");
+  if (!(await existingGamesQuery.get()).empty) {
+    throw new functionsV1.https.HttpsError("already-exists", "Vous avez déjà une partie en attente.");
+  }
+  const userDoc = await admin.firestore().collection("users").doc(uid).get();
+  if (!userDoc.exists) throw new functionsV1.https.HttpsError("not-found", "Profil utilisateur non trouvé.");
+
+  const newGame = {
+    hostId: uid,
+    hostPseudo: userDoc.data()?.pseudo || "Hôte Anonyme",
+    players: [uid],
+    playerDetails: { [uid]: { pseudo: userDoc.data()?.pseudo || "Hôte Anonyme" } },
+    status: "waiting",
+    createdAt: FieldValue.serverTimestamp(),
+  };
+  const gameRef = await admin.firestore().collection("games").add(newGame);
+  return { status: "succès", gameId: gameRef.id };
+});
+
+export const joinGame = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { gameId } = request.data;
+  const { uid } = request.auth;
+  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+
+  const userDoc = await admin.firestore().collection("users").doc(uid).get();
+  if (!userDoc.exists) throw new functionsV1.https.HttpsError("not-found", "Profil utilisateur non trouvé.");
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+  const gameDoc = await gameRef.get();
+  if (!gameDoc.exists) throw new functionsV1.https.HttpsError("not-found", "La partie n'existe pas.");
+
+  const gameData = gameDoc.data()!;
+  if (gameData.status !== "waiting") throw new functionsV1.https.HttpsError("failed-precondition", "La partie a déjà commencé.");
+  if (gameData.players.includes(uid)) return { status: "déjà rejoint" };
+  if (gameData.players.length >= 4) throw new functionsV1.https.HttpsError("failed-precondition", "La partie est pleine.");
+
+  await gameRef.update({
+    players: FieldValue.arrayUnion(uid),
+    [`playerDetails.${uid}`]: { pseudo: userDoc.data()?.pseudo || "Joueur Anonyme" },
+  });
+  return { status: "succès" };
+});
+
+export const deleteGame = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { gameId } = request.data;
+  const { uid } = request.auth;
+  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+  const gameDoc = await gameRef.get();
+  if (!gameDoc.exists) throw new functionsV1.https.HttpsError("not-found", "La partie n'existe pas.");
+  if (gameDoc.data()?.hostId !== uid) throw new functionsV1.https.HttpsError("permission-denied", "Vous n'êtes pas l'hôte de cette partie.");
+
+  await gameRef.delete();
+  return { status: "succès" };
+});
+
+export const startGame = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { gameId } = request.data;
+  const { uid } = request.auth;
+  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+  const gameDoc = await gameRef.get();
+  const gameData = gameDoc.data()!;
+  if (gameData.hostId !== uid) throw new functionsV1.https.HttpsError("permission-denied", "Seul l'hôte peut lancer la partie.");
+  if (gameData.status !== "waiting") throw new functionsV1.https.HttpsError("failed-precondition", "La partie a déjà commencé.");
+
+  const playerPositions: Record<string, number> = {};
+  const playerQuests: Record<string, Quest> = {};
+  const introQuest: Quest = {
+    questId: "INTRO_01",
+    title: "Les Premiers Pas du Sorcier",
+    currentStep: 0,
+    steps: [
+      { description: "Lancez le dé pour la première fois.", objective: "roll_dice", completed: false },
+      { description: "Réussissez votre premier quiz.", objective: "win_quiz", completed: false },
+    ],
+  };
+  gameData.players.forEach((p: string) => {
+    playerPositions[p] = 0;
+    playerQuests[p] = introQuest;
+  });
+
+  const boardLayout = Array.from({ length: 30 }, (_, i) => {
+    if (i === 0) return { type: "start" };
+    if ((i % 7 === 0) || (i % 11 === 0)) return { type: "event" };
+    if (i === 29) return { type: "finish" };
+    return { type: "quiz" };
+  });
+
+  await gameRef.update({
+    status: "in-progress",
+    turnOrder: gameData.players,
+    currentPlayerId: gameData.players[0],
+    playerPositions,
+    playerQuests,
+    boardLayout,
+  });
+  return { status: "succès" };
+});
+
+
+// =================================================================
+//                    LOGIQUE DE JEU (TOUR, ÉVÉNEMENTS, MINI-JEUX)
+// =================================================================
+
+export const takeTurn = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { gameId } = request.data;
+  const { uid } = request.auth;
+  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+
+  try {
+    return await admin.firestore().runTransaction(async (t) => {
+      const gameDoc = await t.get(gameRef);
+      if (!gameDoc.exists) throw new functionsV1.https.HttpsError("not-found", "Partie non trouvée.");
+
+      const gameData = gameDoc.data()!;
+      if (gameData.currentPlayerId !== uid) throw new functionsV1.https.HttpsError("failed-precondition", "Ce n'est pas votre tour.");
+      if (gameData.currentMiniGame || gameData.currentEvent) throw new functionsV1.https.HttpsError("failed-precondition", "Vous devez d'abord résoudre l'événement en cours.");
+
+      const diceRoll = Math.floor(Math.random() * 6) + 1;
+      const newPosition = (gameData.playerPositions[uid] + diceRoll) % gameData.boardLayout.length;
+      const tile = gameData.boardLayout[newPosition];
+
+      const updates: Record<string, any> = {
+        [`playerPositions.${uid}`]: newPosition,
+        lastDiceRoll: { playerId: uid, value: diceRoll },
+      };
+
+      const playerQuest = gameData.playerQuests?.[uid];
+      if (playerQuest?.steps[playerQuest.currentStep]?.objective === "roll_dice") {
+        updates[`playerQuests.${uid}`] = completeQuestStep(playerQuest, playerQuest.currentStep);
+      }
+
+      switch (tile.type) {
+      case "quiz":
+        updates.currentMiniGame = { type: "quiz", question: "Le mot '친구' signifie :", options: ["Ami", "Famille", "Professeur"], correctAnswer: "Ami", playerId: uid };
+        break;
+      case "event":
+        updates.currentEvent = { type: "mana_bonus", title: "Pluie de Mana !", message: "Vous trouvez une source d'énergie magique. Vous gagnez 20 points de Mana !", playerId: uid };
+        break;
+      default: {
+        const currentPlayerIndex = gameData.turnOrder.indexOf(uid);
+        updates.currentPlayerId = gameData.turnOrder[(currentPlayerIndex + 1) % gameData.turnOrder.length];
+        break;
+      }
+      }
+
+      t.update(gameRef, updates);
+      return { status: "succès", diceRoll };
+    });
+  } catch (error) {
+    logger.error(`Erreur lors du tour de ${uid}:`, error);
+    if (error instanceof functionsV1.https.HttpsError) throw error;
+    throw new functionsV1.https.HttpsError("internal", "Impossible de jouer le tour.");
+  }
+});
+
+export const submitMiniGameResults = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { gameId, answer } = request.data;
+  const { uid } = request.auth;
+  if (!gameId || answer === undefined) throw new functionsV1.https.HttpsError("invalid-argument", "Données manquantes.");
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+  const userRef = admin.firestore().collection("users").doc(uid);
+
+  try {
+    return await admin.firestore().runTransaction(async (t) => {
+      const gameDoc = await t.get(gameRef);
+      if (!gameDoc.exists) throw new functionsV1.https.HttpsError("not-found", "Partie non trouvée.");
+
+      const gameData = gameDoc.data()!;
+      const miniGame = gameData.currentMiniGame;
+      if (!miniGame || miniGame.playerId !== uid) throw new functionsV1.https.HttpsError("failed-precondition", "Pas de mini-jeu actif pour vous.");
+
+      let resultMessage = "Réponse incorrecte.";
+      const updates: Record<string, any> = {};
+
+      if (answer === miniGame.correctAnswer) {
+        t.update(userRef, { "xp": FieldValue.increment(10), "fragments.vocab": FieldValue.increment(1) });
+        resultMessage = "Bonne réponse ! +10 XP & +1 Fragment !";
+
+        const playerQuest = gameData.playerQuests?.[uid];
+        if (playerQuest?.steps[playerQuest.currentStep]?.objective === "win_quiz") {
+          updates[`playerQuests.${uid}`] = completeQuestStep(playerQuest, playerQuest.currentStep);
+        }
+      }
+
+      const currentPlayerIndex = gameData.turnOrder.indexOf(uid);
+      updates.currentMiniGame = null;
+      updates.currentPlayerId = gameData.turnOrder[(currentPlayerIndex + 1) % gameData.turnOrder.length];
+
+      t.update(gameRef, updates);
+      return { status: "succès", message: resultMessage };
+    });
+  } catch (error) {
+    logger.error(`Erreur de soumission du mini-jeu pour ${uid}:`, error);
+    if (error instanceof functionsV1.https.HttpsError) throw error;
+    throw new functionsV1.https.HttpsError("internal", "Impossible de traiter la réponse.");
+  }
+});
+
+export const resolveEvent = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { gameId } = request.data;
+  const { uid } = request.auth;
+  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+  const userRef = admin.firestore().collection("users").doc(uid);
+
+  try {
+    return await admin.firestore().runTransaction(async (t) => {
+      const gameDoc = await t.get(gameRef);
+      const gameData = gameDoc.data()!;
+      const event = gameData.currentEvent;
+      if (!event || event.playerId !== uid) throw new functionsV1.https.HttpsError("failed-precondition", "Pas d'événement actif pour vous.");
+
+      if (event.type === "mana_bonus") {
+        t.update(userRef, { manaCurrent: FieldValue.increment(20) });
+      }
+
+      const currentPlayerIndex = gameData.turnOrder.indexOf(uid);
+      t.update(gameRef, {
+        currentEvent: null,
+        currentPlayerId: gameData.turnOrder[(currentPlayerIndex + 1) % gameData.turnOrder.length],
+      });
+      return { status: "succès", message: "Événement résolu." };
+    });
+  } catch (error) {
+    logger.error(`Erreur de résolution de l'événement pour ${uid}:`, error);
+    if (error instanceof functionsV1.https.HttpsError) throw error;
+    throw new functionsV1.https.HttpsError("internal", "Impossible de traiter l'événement.");
+  }
+});
+
+
+// =================================================================
+//                    SYSTÈME DE RÉPÉTITION ESPACÉE (SRS)
+// =================================================================
+
+export const getReviewItems = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { uid } = request.auth;
+  const query = admin.firestore().collection("users").doc(uid).collection("learningItemsStatus").orderBy("lastReviewed", "asc").limit(5);
+  const snapshot = await query.get();
+  const reviewItems = snapshot.docs.map((doc): ReviewItem => ({
+    id: doc.id,
+    ...(doc.data() as { lastReviewed: admin.firestore.Timestamp; correctStreak: number }),
+  }));
+  return { items: reviewItems };
+});
+
+export const submitSrsReview = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  const { itemId, wasCorrect } = request.data;
+  const { uid } = request.auth;
+  if (!itemId || wasCorrect === undefined) throw new functionsV1.https.HttpsError("invalid-argument", "Données manquantes.");
+
+  const itemRef = admin.firestore().collection("users").doc(uid).collection("learningItemsStatus").doc(itemId);
+  const updateData = {
+    lastReviewed: FieldValue.serverTimestamp(),
+    correctStreak: wasCorrect ? FieldValue.increment(1) : 0,
+  };
+  await itemRef.update(updateData);
+  return { status: "succès" };
+});
+
+
+// =================================================================
+//                    RÉCUPÉRATION DE DONNÉES SÉCURISÉES
+// =================================================================
+
+/**
+ * @description Récupère les données du profil de l'utilisateur connecté.
+ * @param {object} request - La requête de la fonction.
+ * @returns {Promise<any>} Le document du profil utilisateur.
+ */
+export const getUserProfile = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté pour accéder à ces données.");
+  }
+  const { uid } = request.auth;
+
+  try {
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "Profil utilisateur non trouvé.");
+    }
+    return userDoc.data();
+  } catch (error) {
+    logger.error(`Erreur lors de la récupération du profil pour ${uid}:`, error);
+    if (error instanceof functionsV1.https.HttpsError) throw error;
+    throw new functionsV1.https.HttpsError("internal", "Impossible de récupérer le profil utilisateur.");
+  }
+});

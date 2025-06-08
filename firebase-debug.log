@@ -1,0 +1,16 @@
+[debug] [2025-06-08T13:40:14.280Z] ----------------------------------------------------------------------
+[debug] [2025-06-08T13:40:14.282Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\vschmitt\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only functions
+[debug] [2025-06-08T13:40:14.282Z] CLI Version:   14.6.0
+[debug] [2025-06-08T13:40:14.282Z] Platform:      win32
+[debug] [2025-06-08T13:40:14.283Z] Node Version:  v20.11.0
+[debug] [2025-06-08T13:40:14.283Z] Time:          Sun Jun 08 2025 15:40:14 GMT+0200 (Central European Summer Time)
+[debug] [2025-06-08T13:40:14.283Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-06-08T13:40:14.431Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-06-08T13:40:14.432Z] > authorizing via signed-in user (vsc77420@gmail.com)
+[debug] [2025-06-08T13:40:14.432Z] [iam] checking project kacademy-d125a for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2025-06-08T13:40:14.433Z] Checked if tokens are valid: false, expires at: 1749390537347
+[debug] [2025-06-08T13:40:14.433Z] Checked if tokens are valid: false, expires at: 1749390537347
+[debug] [2025-06-08T13:40:14.433Z] > refreshing access token with scopes: []
+[debug] [2025-06-08T13:40:14.434Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2025-06-08T13:40:14.435Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]

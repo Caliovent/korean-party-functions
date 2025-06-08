@@ -1,20 +1,10 @@
-# Dépendances
-node_modules
+# Compiled JavaScript files
+lib/**/*.js
+lib/**/*.js.map
 
-# Fichiers de build (TypeScript -> JavaScript)
-lib/
+# TypeScript v1 declaration files
+typings/
 
-# Fichiers d'environnement locaux
-.env
-.env.local
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Fichiers système
-.DS_Store
-Thumbs.db
+# Node.js dependency directory
+node_modules/
+*.local
