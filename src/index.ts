@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable valid-jsdoc */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable max-len */
 import { onCall } from "firebase-functions/v2/https";
@@ -28,33 +26,22 @@ interface Quest {
   steps: QuestStep[];
 }
 
-
 interface ReviewItem {
   id: string;
   lastReviewed: admin.firestore.Timestamp;
   correctStreak: number;
 }
 
-/**
- * @description Structure de configuration pour chaque case du plateau.
- * Cette interface est maintenant la source de vérité pour le backend et le frontend.
- */
 interface TileConfig {
   type: "start" | "finish" | "quiz" | "bonus" | "malus" | "event" | "duel" | "teleport" | "shop";
   data?: {
-    // Pour 'bonus' ou 'malus'
     mana?: number;
     xp?: number;
-    // Pour 'quiz'
     quizId?: string;
-    // Pour 'teleport'
     targetPosition?: number;
   };
 }
 
-/**
- * @description Définit la signature pour toutes les fonctions de gestion d'effets de case.
- */
 type TileEffectHandler = (
   t: admin.firestore.Transaction,
   gameRef: DocumentReference,
@@ -72,7 +59,7 @@ type TileEffectHandler = (
  * Met à jour un objet de quête en marquant une étape comme terminée.
  * @param {Quest} quest L'objet de quête du joueur.
  * @param {number} stepIndex L'index de l'étape à compléter.
- * @return {Quest} Le nouvel objet de quête mis à jour.
+ * @returns {Quest} Le nouvel objet de quête mis à jour.
  */
 function completeQuestStep(quest: Quest, stepIndex: number): Quest {
   const newSteps = [...quest.steps];
@@ -199,11 +186,10 @@ export const deleteGame = onCall({ cors: true }, async (request) => {
   return { status: "succès" };
 });
 
+
 /**
  * @description Génère la disposition du plateau de jeu.
- * C'est ici que nous définissons le plateau pour chaque nouvelle partie.
- * Cette fonction est conçue pour être facilement modifiable pour créer des plateaux variés.
- * @return {TileConfig[]} Le tableau décrivant la configuration du plateau.
+ * @returns {TileConfig[]} Le tableau décrivant la configuration du plateau.
  */
 function generateBoardLayout(): TileConfig[] {
   const boardSize = 30;
@@ -245,7 +231,6 @@ export const startGame = onCall({ cors: true }, async (request) => {
     playerPositions[p] = 0;
   });
 
-  // Génération du plateau dynamique
   const boardLayout = generateBoardLayout();
 
   await gameRef.update({
@@ -253,26 +238,24 @@ export const startGame = onCall({ cors: true }, async (request) => {
     turnOrder: gameData.players,
     currentPlayerId: gameData.players[0],
     playerPositions,
-    // Le plateau est maintenant stocké dans la partie, il devient la source de vérité.
     boardLayout,
-    playerQuests: {}, // Quêtes initialisées plus tard
+    playerQuests: {},
   });
   return { status: "succès" };
 });
 
 
 // =================================================================
-//        NOUVELLE ARCHITECTURE MODULAIRE POUR LA LOGIQUE DE JEU
+//        ARCHITECTURE MODULAIRE POUR LA LOGIQUE DE JEU
 // =================================================================
 
 /**
  * Gestionnaire pour les cases BONUS. Augmente le mana ou l'XP du joueur.
- * @param {admin.firestore.Transaction} t - La transaction Firestore.
- * @param {DocumentReference} gameRef - La référence au document du jeu.
- * @param {any} gameData - Les données actuelles du jeu.
- * @param {string} playerId - L'ID du joueur.
- * @param {any} tileData - Les données spécifiques à la case.
- * @return {Promise<void>}
+ * @param {admin.firestore.Transaction} t La transaction.
+ * @param {DocumentReference} gameRef La référence au jeu.
+ * @param {any} gameData Les données du jeu.
+ * @param {string} playerId L'ID du joueur.
+ * @param {any} tileData Les données de la case.
  */
 const handleBonusTile: TileEffectHandler = async (t, gameRef, gameData, playerId, tileData) => {
   const userRef = db.collection("users").doc(playerId);
@@ -280,6 +263,7 @@ const handleBonusTile: TileEffectHandler = async (t, gameRef, gameData, playerId
     t.update(userRef, { manaCurrent: FieldValue.increment(tileData.mana) });
   }
   if (tileData?.xp) {
+    // CORRECTION: Correction de la coquille userRquestef -> userRef
     t.update(userRef, { xp: FieldValue.increment(tileData.xp) });
   }
   await advanceToNextPlayer(gameRef, gameData, t);
@@ -287,12 +271,11 @@ const handleBonusTile: TileEffectHandler = async (t, gameRef, gameData, playerId
 
 /**
  * Gestionnaire pour les cases MALUS. Diminue le mana du joueur.
- * @param {admin.firestore.Transaction} t - La transaction Firestore.
- * @param {DocumentReference} gameRef - La référence au document du jeu.
- * @param {any} gameData - Les données actuelles du jeu.
- * @param {string} playerId - L'ID du joueur.
- * @param {any} tileData - Les données spécifiques à la case.
- * @return {Promise<void>}
+ * @param {admin.firestore.Transaction} t La transaction.
+ * @param {DocumentReference} gameRef La référence au jeu.
+ * @param {any} gameData Les données du jeu.
+ * @param {string} playerId L'ID du joueur.
+ * @param {any} tileData Les données de la case.
  */
 const handleMalusTile: TileEffectHandler = async (t, gameRef, gameData, playerId, tileData) => {
   const userRef = db.collection("users").doc(playerId);
@@ -303,13 +286,12 @@ const handleMalusTile: TileEffectHandler = async (t, gameRef, gameData, playerId
 };
 
 /**
- * Gestionnaire pour les cases QUIZ. Met en place un mini-jeu de quiz.
- * @param {admin.firestore.Transaction} t - La transaction Firestore.
- * @param {DocumentReference} gameRef - La référence au document du jeu.
- * @param {any} gameData - Les données actuelles du jeu.
- * @param {string} playerId - L'ID du joueur.
- * @param {any} _tileData - Les données spécifiques à la case (non utilisées pour l'instant).
- * @return {Promise<void>}
+ * Gestionnaire pour les cases QUIZ. Met en place un mini-jeu.
+ * @param {admin.firestore.Transaction} t La transaction.
+ * @param {DocumentReference} gameRef La référence au jeu.
+ * @param {any} _gameData Les données du jeu (non utilisées).
+ * @param {string} playerId L'ID du joueur.
+ * @param {any} _tileData Les données de la case (non utilisées).
  */
 const handleQuizTile: TileEffectHandler = async (t, gameRef, _gameData, playerId, _tileData) => {
   const updates = {
@@ -320,12 +302,11 @@ const handleQuizTile: TileEffectHandler = async (t, gameRef, _gameData, playerId
 
 /**
  * Gestionnaire pour les cases EVENT. Déclenche un événement aléatoire.
- * @param {admin.firestore.Transaction} t - La transaction Firestore.
- * @param {DocumentReference} gameRef - La référence au document du jeu.
- * @param {any} gameData - Les données actuelles du jeu.
- * @param {string} playerId - L'ID du joueur.
- * @param {any} _tileData - Les données spécifiques à la case (non utilisées pour l'instant).
- * @return {Promise<void>}
+ * @param {admin.firestore.Transaction} t La transaction.
+ * @param {DocumentReference} gameRef La référence au jeu.
+ * @param {any} _gameData Les données du jeu (non utilisées).
+ * @param {string} playerId L'ID du joueur.
+ * @param {any} _tileData Les données de la case (non utilisées).
  */
 const handleEventTile: TileEffectHandler = async (t, gameRef, _gameData, playerId, _tileData) => {
   const updates = {
@@ -334,14 +315,11 @@ const handleEventTile: TileEffectHandler = async (t, gameRef, _gameData, playerI
   t.update(gameRef, updates);
 };
 
-// "Répertoire" de nos gestionnaires d'effets.
-// Pour ajouter un nouveau type de case, il suffit de créer la fonction et de l'ajouter ici.
 const tileEffectHandlers: Record<string, TileEffectHandler> = {
   "bonus": handleBonusTile,
   "malus": handleMalusTile,
   "quiz": handleQuizTile,
   "event": handleEventTile,
-  // 'duel': handleDuelTile, // Prêt à être implémenté !
 };
 
 
@@ -371,7 +349,6 @@ export const takeTurn = onCall({ cors: true }, async (request) => {
         lastDiceRoll: { playerId: uid, value: diceRoll },
       };
 
-      // Logique de quête (ré-intégrée)
       const playerQuest = gameData.playerQuests?.[uid];
       if (playerQuest?.steps[playerQuest.currentStep]?.objective === "roll_dice") {
         updates[`playerQuests.${uid}`] = completeQuestStep(playerQuest, playerQuest.currentStep);
@@ -418,11 +395,9 @@ export const submitMiniGameResults = onCall({ cors: true }, async (request) => {
       const updates: Record<string, any> = { currentMiniGame: null };
 
       if (answer === miniGame.correctAnswer) {
-        const userUpdates = { "xp": FieldValue.increment(10), "fragments.vocab": FieldValue.increment(1) };
-        t.update(userRef, userUpdates);
+        t.update(userRef, { "xp": FieldValue.increment(10), "fragments.vocab": FieldValue.increment(1) });
         resultMessage = "Bonne réponse ! +10 XP & +1 Fragment !";
 
-        // Logique de quête (ré-intégrée)
         const playerQuest = gameData.playerQuests?.[uid];
         if (playerQuest?.steps[playerQuest.currentStep]?.objective === "win_quiz") {
           updates[`playerQuests.${uid}`] = completeQuestStep(playerQuest, playerQuest.currentStep);
