@@ -379,48 +379,83 @@ function generateBoardLayout(): TileConfig[] {
 }
 
 
-export const startGame = onCall({ cors: true }, async (request) => {
-  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
-  const { gameId } = request.data;
-  const { uid } = request.auth;
-  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+/**
+ * startGame
+ * * Démarre une partie, la faisant passer du statut "waiting" à "playing".
+ */
+export const startGame = onCall(async (request) => {
+  // 1. Validation de l'authentification et des entrées
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Vous devez être connecté pour démarrer une partie."
+    );
+  }
 
+  const gameId = request.data.gameId;
+  if (typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie est invalide.");
+  }
+
+  const uid = request.auth.uid;
   const gameRef = db.collection("games").doc(gameId);
-  const gameDoc = await gameRef.get();
-  const gameData = gameDoc.data()!;
-  if (gameData.hostId !== uid) throw new functionsV1.https.HttpsError("permission-denied", "Seul l'hôte peut lancer la partie.");
-  if (gameData.status !== "waiting") throw new functionsV1.https.HttpsError("failed-precondition", "La partie a déjà commencé.");
 
-  const playerPositions: Record<string, number> = {};
+  try {
+    const gameDoc = await gameRef.get();
+    if (!gameDoc.exists) {
+      throw new HttpsError("not-found", "Cette partie n'existe pas.");
+    }
 
-  // --- MODIFICATION : Ajout de la quête d'introduction ---
-  const playerQuests: Record<string, Quest> = {};
-  const introQuest: Quest = {
-    questId: "INTRO_01",
-    title: "Les Premiers Pas du Sorcier",
-    currentStep: 0,
-    steps: [
-      { description: "Lancez le dé pour la première fois.", objective: "roll_dice", completed: false },
-      { description: "Réussissez votre premier quiz.", objective: "win_quiz", completed: false },
-    ],
-  };
+    const gameData = gameDoc.data();
 
-  gameData.players.forEach((p: string) => {
-    playerPositions[p] = 0;
-    playerQuests[p] = introQuest; // Assigner la quête à chaque joueur
-  });
+    // 2. Validation métier
+    if (gameData?.hostId !== uid) {
+      throw new HttpsError(
+        "permission-denied",
+        "Seul l'hôte peut démarrer la partie."
+      );
+    }
 
-  const boardLayout = generateBoardLayout();
+    if (gameData?.status !== "waiting") {
+      throw new HttpsError(
+        "failed-precondition",
+        "La partie a déjà commencé ou est terminée."
+      );
+    }
 
-  await gameRef.update({
-    status: "in-progress",
-    turnOrder: gameData.players,
-    currentPlayerId: gameData.players[0],
-    playerPositions,
-    boardLayout,
-    playerQuests, // Sauvegarder l'objet des quêtes
-  });
-  return { status: "succès" };
+    const players = gameData?.players || [];
+    if (players.length < 2 || players.length > 4) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Il faut être entre 2 et 4 joueurs pour commencer."
+      );
+    }
+
+    // 3. Initialisation de l'état de jeu
+    // Algorithme de mélange de Fisher-Yates pour garantir l'équité
+    for (let i = players.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [players[i], players[j]] = [players[j], players[i]];
+    }
+
+    // 4. Mise à jour de la partie
+    await gameRef.update({
+      status: "playing",
+      players: players, // On sauvegarde la liste des joueurs avec le nouvel ordre
+      currentPlayerId: players[0].uid, // Le premier joueur de la liste mélangée commence
+    });
+
+    return { success: true, message: "La partie commence !" };
+  } catch (error) {
+    console.error("Erreur lors du démarrage de la partie:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "Une erreur interne est survenue lors du démarrage de la partie."
+    );
+  }
 });
 
 
