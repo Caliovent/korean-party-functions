@@ -2,11 +2,13 @@
 /* eslint-disable valid-jsdoc */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable max-len */
-import { onCall } from "firebase-functions/v2/https";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as functionsV1 from "firebase-functions/v1";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue, DocumentReference } from "firebase-admin/firestore";
+import * as functions from "firebase-functions";
+import { Player } from "./types";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -126,27 +128,74 @@ export const updateUserProfile = onCall({ cors: true }, async (request) => {
 //                    GESTION DU LOBBY ET DES PARTIES
 // =================================================================
 
-export const createGame = onCall({ cors: true }, async (request) => {
-  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
-  const { uid } = request.auth;
-  const existingGamesQuery = admin.firestore().collection("games").where("hostId", "==", uid).where("status", "==", "waiting");
-  if (!(await existingGamesQuery.get()).empty) {
-    throw new functionsV1.https.HttpsError("already-exists", "Vous avez déjà une partie en attente.");
+/**
+ * createGame
+ * Crée une nouvelle partie dans Firestore en utilisant la syntaxe v2 des Cloud Functions.
+ * L'utilisateur qui appelle cette fonction devient l'hôte.
+ */
+export const createGame = onCall(async (request) => { // MODIFIÉ ICI
+  // 1. Validation de l'authentification
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Vous devez être connecté pour créer une partie."
+    );
   }
-  const userDoc = await admin.firestore().collection("users").doc(uid).get();
-  if (!userDoc.exists) throw new functionsV1.https.HttpsError("not-found", "Profil utilisateur non trouvé.");
 
-  const newGame = {
-    hostId: uid,
-    hostPseudo: userDoc.data()?.pseudo || "Hôte Anonyme",
-    players: [uid],
-    playerDetails: { [uid]: { pseudo: userDoc.data()?.pseudo || "Hôte Anonyme" } },
-    status: "waiting",
-    createdAt: FieldValue.serverTimestamp(),
-  };
-  const gameRef = await admin.firestore().collection("games").add(newGame);
-  return { status: "succès", gameId: gameRef.id };
+  // 2. Validation des entrées
+  const gameName = request.data.gameName; // MODIFIÉ ICI
+  if (typeof gameName !== "string" || gameName.length < 3 || gameName.length > 50) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Le nom de la partie doit contenir entre 3 et 50 caractères."
+    );
+  }
+
+  const uid = request.auth.uid; // MODIFIÉ ICI
+
+  try {
+    // 3. Récupérer les informations du joueur depuis la collection 'users'
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists) {
+      throw new HttpsError(
+        "not-found",
+        "L'utilisateur n'existe pas dans la base de données."
+      );
+    }
+    const userData = userDoc.data();
+    const displayName = userData?.displayName || "Sorcier Anonyme";
+
+    // 4. Préparation de l'objet Player pour l'hôte
+    const hostPlayer: Player = {
+      uid: uid,
+      displayName: displayName,
+      position: 0,
+      mana: 20,
+    };
+
+    // 5. Création du nouvel objet Game
+    const newGame = {
+      name: gameName,
+      hostId: uid,
+      status: "waiting" as const,
+      players: [hostPlayer],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    // 6. Ajout du document à Firestore
+    const gameRef = await db.collection("games").add(newGame);
+
+    // 7. Retourner l'ID de la nouvelle partie
+    return { gameId: gameRef.id };
+  } catch (error) {
+    console.error("Erreur lors de la création de la partie:", error);
+    throw new HttpsError(
+      "internal",
+      "Une erreur interne est survenue lors de la création de la partie."
+    );
+  }
 });
+
 
 export const joinGame = onCall({ cors: true }, async (request) => {
   if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
