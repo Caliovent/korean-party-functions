@@ -13,6 +13,28 @@ import { Player } from "./types";
 admin.initializeApp();
 const db = admin.firestore();
 
+// Définition temporaire du plateau de jeu.
+// Ceci sera externalisé plus tard dans la configuration de la partie.
+const boardLayout: { type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ" }[] = [
+  { type: "SAFE_ZONE" }, // Case 0 (Départ)
+  { type: "MANA_GAIN" },
+  { type: "MINI_GAME_QUIZ" },
+  { type: "MANA_GAIN" },
+  { type: "SAFE_ZONE" },
+  { type: "MANA_GAIN" },
+  { type: "MINI_GAME_QUIZ" },
+  { type: "MANA_GAIN" },
+  { type: "SAFE_ZONE" },
+  { type: "MANA_GAIN" },
+  // ... continuez à définir les 30 cases
+];
+// Remplissage rapide pour l'exemple
+for (let i = boardLayout.length; i < 30; i++) {
+  if (i % 3 === 0) boardLayout.push({ type: "MINI_GAME_QUIZ" });
+  else if (i % 2 === 0) boardLayout.push({ type: "MANA_GAIN" });
+  else boardLayout.push({ type: "SAFE_ZONE" });
+}
+
 // =================================================================
 //                    INTERFACES ET TYPES
 // =================================================================
@@ -790,6 +812,89 @@ export const rollDice = onCall(async (request) => {
     throw new HttpsError(
       "internal",
       "Une erreur interne est survenue lors du lancer de dé."
+    );
+  }
+});
+
+/**
+ * resolveTileAction
+ * * Applique l'effet de la case sur laquelle le joueur a atterri et passe au joueur suivant.
+ */
+export const resolveTileAction = onCall(async (request) => {
+  // 1. Validation
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté.");
+  }
+
+  const gameId = request.data.gameId;
+  if (typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie est invalide.");
+  }
+
+  const uid = request.auth.uid;
+  const gameRef = db.collection("games").doc(gameId);
+
+  try {
+    const gameDoc = await gameRef.get();
+    if (!gameDoc.exists) {
+      throw new HttpsError("not-found", "Cette partie n'existe pas.");
+    }
+
+    const gameData = gameDoc.data();
+    if (!gameData) throw new HttpsError("internal", "Données de jeu introuvables.");
+
+
+    // 2. Validation métier
+    if (gameData.status !== "playing" || gameData.currentPlayerId !== uid || gameData.turnState !== "RESOLVING_TILE") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Impossible de résoudre l'action de la case maintenant."
+      );
+    }
+
+    // 3. Application de l'effet de la case
+    const currentPlayerIndex = gameData.players.findIndex((p: Player) => p.uid === uid);
+    const currentPlayer = gameData.players[currentPlayerIndex];
+    const tile = boardLayout[currentPlayer.position];
+    let newMana = currentPlayer.mana;
+
+    switch (tile.type) {
+    case "MANA_GAIN":
+      newMana += 10; // Valeur à définir dans la config du plateau
+      break;
+    case "MINI_GAME_QUIZ":
+      // La logique pour lancer un mini-jeu sera implémentée ici plus tard.
+      // Pour l'instant, on considère que c'est une case sûre.
+      break;
+    case "SAFE_ZONE":
+    default:
+      // Aucun effet sur les cases sûres
+      break;
+    }
+
+    const updatedPlayers = [...gameData.players];
+    updatedPlayers[currentPlayerIndex] = { ...currentPlayer, mana: newMana };
+
+    // 4. Passage au joueur suivant
+    const nextPlayerIndex = (currentPlayerIndex + 1) % updatedPlayers.length;
+    const nextPlayerId = updatedPlayers[nextPlayerIndex].uid;
+
+    // 5. Mise à jour de la partie
+    await gameRef.update({
+      players: updatedPlayers,
+      currentPlayerId: nextPlayerId,
+      turnState: "AWAITING_ROLL",
+    });
+
+    return { success: true, tileEffect: tile.type, manaChange: newMana - currentPlayer.mana };
+  } catch (error) {
+    console.error("Erreur lors de la résolution de l'action:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "Une erreur interne est survenue lors de la résolution de l'action."
     );
   }
 });
