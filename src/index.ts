@@ -197,29 +197,142 @@ export const createGame = onCall(async (request) => { // MODIFIÉ ICI
 });
 
 
-export const joinGame = onCall({ cors: true }, async (request) => {
-  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
-  const { gameId } = request.data;
-  const { uid } = request.auth;
-  if (!gameId) throw new functionsV1.https.HttpsError("invalid-argument", "L'ID de la partie est requis.");
+/**
+ * joinGame
+ * * Permet à un utilisateur de rejoindre une partie existante.
+ */
+export const joinGame = onCall(async (request) => {
+  // 1. Validation de l'authentification
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Vous devez être connecté pour rejoindre une partie."
+    );
+  }
 
-  const userDoc = await admin.firestore().collection("users").doc(uid).get();
-  if (!userDoc.exists) throw new functionsV1.https.HttpsError("not-found", "Profil utilisateur non trouvé.");
+  // 2. Validation des entrées
+  const gameId = request.data.gameId;
+  if (typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie est invalide.");
+  }
 
-  const gameRef = admin.firestore().collection("games").doc(gameId);
-  const gameDoc = await gameRef.get();
-  if (!gameDoc.exists) throw new functionsV1.https.HttpsError("not-found", "La partie n'existe pas.");
+  const uid = request.auth.uid;
+  const gameRef = db.collection("games").doc(gameId);
 
-  const gameData = gameDoc.data()!;
-  if (gameData.status !== "waiting") throw new functionsV1.https.HttpsError("failed-precondition", "La partie a déjà commencé.");
-  if (gameData.players.includes(uid)) return { status: "déjà rejoint" };
-  if (gameData.players.length >= 4) throw new functionsV1.https.HttpsError("failed-precondition", "La partie est pleine.");
+  try {
+    const gameDoc = await gameRef.get();
+    if (!gameDoc.exists) {
+      throw new HttpsError("not-found", "Cette partie n'existe pas.");
+    }
 
-  await gameRef.update({
-    players: FieldValue.arrayUnion(uid),
-    [`playerDetails.${uid}`]: { pseudo: userDoc.data()?.pseudo || "Joueur Anonyme" },
-  });
-  return { status: "succès" };
+    const gameData = gameDoc.data();
+    const players = gameData?.players || [];
+
+    // 3. Logique de validation métier
+    if (gameData?.status !== "waiting") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Vous ne pouvez pas rejoindre une partie qui a déjà commencé ou est terminée."
+      );
+    }
+
+    if (players.length >= 4) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Cette partie est déjà pleine."
+      );
+    }
+
+    if (players.some((player: Player) => player.uid === uid)) {
+      // Le joueur est déjà dans la partie, on ne fait rien.
+      return { message: "Vous êtes déjà dans cette partie." };
+    }
+
+    // 4. Préparation du nouvel objet Player
+    const userDoc = await db.collection("users").doc(uid).get();
+    const displayName = userDoc.data()?.displayName || "Sorcier Anonyme";
+
+    const newPlayer: Player = {
+      uid: uid,
+      displayName: displayName,
+      position: 0,
+      mana: 20,
+    };
+
+    // 5. Ajout atomique du joueur à la partie
+    await gameRef.update({
+      players: FieldValue.arrayUnion(newPlayer),
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Erreur pour rejoindre la partie:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "Une erreur interne est survenue pour rejoindre la partie."
+    );
+  }
+});
+
+
+/**
+ * leaveGame
+ * * Permet à un utilisateur de quitter une partie.
+ * * Si l'hôte quitte, la partie est supprimée.
+ */
+export const leaveGame = onCall(async (request) => {
+  // 1. Validation
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Vous devez être connecté pour quitter une partie."
+    );
+  }
+
+  const gameId = request.data.gameId;
+  if (typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie est invalide.");
+  }
+
+  const uid = request.auth.uid;
+  const gameRef = db.collection("games").doc(gameId);
+
+  try {
+    const gameDoc = await gameRef.get();
+    if (!gameDoc.exists) {
+      // La partie n'existe déjà plus, on considère l'action comme réussie.
+      return { success: true, message: "La partie n'existe plus." };
+    }
+
+    const gameData = gameDoc.data();
+
+    // 2. Si le joueur qui part est l'hôte, supprimer la partie
+    if (gameData?.hostId === uid) {
+      await gameRef.delete();
+      return { success: true, message: "Partie dissoute par l'hôte." };
+    }
+
+    // 3. Sinon, retirer le joueur de la liste
+    const playerToRemove = gameData?.players.find((p: Player) => p.uid === uid);
+    if (playerToRemove) {
+      await gameRef.update({
+        players: FieldValue.arrayRemove(playerToRemove),
+      });
+      return { success: true, message: "Vous avez quitté la partie." };
+    }
+
+    // Si le joueur n'était pas dans la liste, on ne fait rien.
+    return { success: true, message: "Vous n'étiez pas dans cette partie." };
+  } catch (error) {
+    console.error("Erreur pour quitter la partie:", error);
+    throw new HttpsError(
+      "internal",
+      "Une erreur interne est survenue pour quitter la partie."
+    );
+  }
 });
 
 export const deleteGame = onCall({ cors: true }, async (request) => {
