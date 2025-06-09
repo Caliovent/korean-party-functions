@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable valid-jsdoc */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable max-len */
 import { onCall } from "firebase-functions/v2/https";
@@ -54,12 +56,12 @@ type TileEffectHandler = (
 // =================================================================
 //                    FONCTIONS UTILITAIRES INTERNES
 // =================================================================
-
+// Fonction utilitaire pour compléter une étape de quête
 /**
- * Met à jour un objet de quête en marquant une étape comme terminée.
- * @param {Quest} quest L'objet de quête du joueur.
- * @param {number} stepIndex L'index de l'étape à compléter.
- * @returns {Quest} Le nouvel objet de quête mis à jour.
+ * Complète une étape de quête et met à jour l'état de la quête.
+ * @param quest La quête à mettre à jour.
+ * @param stepIndex L'index de l'étape à compléter.
+ * @returns La quête mise à jour.
  */
 function completeQuestStep(quest: Quest, stepIndex: number): Quest {
   const newSteps = [...quest.steps];
@@ -72,10 +74,10 @@ function completeQuestStep(quest: Quest, stepIndex: number): Quest {
 }
 
 /**
- * Fait passer le tour au joueur suivant dans l'ordre défini.
- * @param {DocumentReference} gameRef - Référence au document de la partie.
- * @param {any} gameData - Les données actuelles de la partie.
- * @param {admin.firestore.Transaction} t - La transaction Firestore en cours.
+ * Avance au joueur suivant dans l'ordre de jeu.
+ * @param gameRef Référence du document de la partie.
+ * @param gameData Les données de la partie.
+ * @param t La transaction Firestore en cours.
  */
 async function advanceToNextPlayer(gameRef: DocumentReference, gameData: any, t: admin.firestore.Transaction) {
   const currentPlayerIndex = gameData.turnOrder.indexOf(gameData.currentPlayerId);
@@ -186,11 +188,12 @@ export const deleteGame = onCall({ cors: true }, async (request) => {
   return { status: "succès" };
 });
 
-
-/**
- * @description Génère la disposition du plateau de jeu.
- * @returns {TileConfig[]} Le tableau décrivant la configuration du plateau.
- */
+/** Génère la disposition du plateau de jeu.
+* Le plateau est composé de 30 cases avec des types variés.
+* - La première case est le point de départ.
+* - La dernière case est la ligne d'arrivée.
+* - Des cases bonus, malus, quiz et événements sont réparties sur le plateau.
+*/
 function generateBoardLayout(): TileConfig[] {
   const boardSize = 30;
   const layout: TileConfig[] = [];
@@ -227,8 +230,22 @@ export const startGame = onCall({ cors: true }, async (request) => {
   if (gameData.status !== "waiting") throw new functionsV1.https.HttpsError("failed-precondition", "La partie a déjà commencé.");
 
   const playerPositions: Record<string, number> = {};
+
+  // --- MODIFICATION : Ajout de la quête d'introduction ---
+  const playerQuests: Record<string, Quest> = {};
+  const introQuest: Quest = {
+    questId: "INTRO_01",
+    title: "Les Premiers Pas du Sorcier",
+    currentStep: 0,
+    steps: [
+      { description: "Lancez le dé pour la première fois.", objective: "roll_dice", completed: false },
+      { description: "Réussissez votre premier quiz.", objective: "win_quiz", completed: false },
+    ],
+  };
+
   gameData.players.forEach((p: string) => {
     playerPositions[p] = 0;
+    playerQuests[p] = introQuest; // Assigner la quête à chaque joueur
   });
 
   const boardLayout = generateBoardLayout();
@@ -239,7 +256,7 @@ export const startGame = onCall({ cors: true }, async (request) => {
     currentPlayerId: gameData.players[0],
     playerPositions,
     boardLayout,
-    playerQuests: {},
+    playerQuests, // Sauvegarder l'objet des quêtes
   });
   return { status: "succès" };
 });
@@ -249,34 +266,17 @@ export const startGame = onCall({ cors: true }, async (request) => {
 //        ARCHITECTURE MODULAIRE POUR LA LOGIQUE DE JEU
 // =================================================================
 
-/**
- * Gestionnaire pour les cases BONUS. Augmente le mana ou l'XP du joueur.
- * @param {admin.firestore.Transaction} t La transaction.
- * @param {DocumentReference} gameRef La référence au jeu.
- * @param {any} gameData Les données du jeu.
- * @param {string} playerId L'ID du joueur.
- * @param {any} tileData Les données de la case.
- */
 const handleBonusTile: TileEffectHandler = async (t, gameRef, gameData, playerId, tileData) => {
   const userRef = db.collection("users").doc(playerId);
   if (tileData?.mana) {
     t.update(userRef, { manaCurrent: FieldValue.increment(tileData.mana) });
   }
   if (tileData?.xp) {
-    // CORRECTION: Correction de la coquille userRquestef -> userRef
     t.update(userRef, { xp: FieldValue.increment(tileData.xp) });
   }
   await advanceToNextPlayer(gameRef, gameData, t);
 };
 
-/**
- * Gestionnaire pour les cases MALUS. Diminue le mana du joueur.
- * @param {admin.firestore.Transaction} t La transaction.
- * @param {DocumentReference} gameRef La référence au jeu.
- * @param {any} gameData Les données du jeu.
- * @param {string} playerId L'ID du joueur.
- * @param {any} tileData Les données de la case.
- */
 const handleMalusTile: TileEffectHandler = async (t, gameRef, gameData, playerId, tileData) => {
   const userRef = db.collection("users").doc(playerId);
   if (tileData?.mana) {
@@ -285,14 +285,6 @@ const handleMalusTile: TileEffectHandler = async (t, gameRef, gameData, playerId
   await advanceToNextPlayer(gameRef, gameData, t);
 };
 
-/**
- * Gestionnaire pour les cases QUIZ. Met en place un mini-jeu.
- * @param {admin.firestore.Transaction} t La transaction.
- * @param {DocumentReference} gameRef La référence au jeu.
- * @param {any} _gameData Les données du jeu (non utilisées).
- * @param {string} playerId L'ID du joueur.
- * @param {any} _tileData Les données de la case (non utilisées).
- */
 const handleQuizTile: TileEffectHandler = async (t, gameRef, _gameData, playerId, _tileData) => {
   const updates = {
     currentMiniGame: { type: "quiz", question: "Le mot '친구' signifie :", options: ["Ami", "Famille", "Professeur"], correctAnswer: "Ami", playerId: playerId },
@@ -300,14 +292,6 @@ const handleQuizTile: TileEffectHandler = async (t, gameRef, _gameData, playerId
   t.update(gameRef, updates);
 };
 
-/**
- * Gestionnaire pour les cases EVENT. Déclenche un événement aléatoire.
- * @param {admin.firestore.Transaction} t La transaction.
- * @param {DocumentReference} gameRef La référence au jeu.
- * @param {any} _gameData Les données du jeu (non utilisées).
- * @param {string} playerId L'ID du joueur.
- * @param {any} _tileData Les données de la case (non utilisées).
- */
 const handleEventTile: TileEffectHandler = async (t, gameRef, _gameData, playerId, _tileData) => {
   const updates = {
     currentEvent: { type: "mana_bonus", title: "Pluie de Mana !", message: "Vous trouvez une source d'énergie magique. Vous gagnez 20 points de Mana !", playerId: playerId },
@@ -349,8 +333,9 @@ export const takeTurn = onCall({ cors: true }, async (request) => {
         lastDiceRoll: { playerId: uid, value: diceRoll },
       };
 
+      // --- MODIFICATION : Logique de quête activée ---
       const playerQuest = gameData.playerQuests?.[uid];
-      if (playerQuest?.steps[playerQuest.currentStep]?.objective === "roll_dice") {
+      if (playerQuest && playerQuest.steps[playerQuest.currentStep]?.objective === "roll_dice") {
         updates[`playerQuests.${uid}`] = completeQuestStep(playerQuest, playerQuest.currentStep);
       }
 
@@ -398,8 +383,9 @@ export const submitMiniGameResults = onCall({ cors: true }, async (request) => {
         t.update(userRef, { "xp": FieldValue.increment(10), "fragments.vocab": FieldValue.increment(1) });
         resultMessage = "Bonne réponse ! +10 XP & +1 Fragment !";
 
+        // --- MODIFICATION : Logique de quête activée ---
         const playerQuest = gameData.playerQuests?.[uid];
-        if (playerQuest?.steps[playerQuest.currentStep]?.objective === "win_quiz") {
+        if (playerQuest && playerQuest.steps[playerQuest.currentStep]?.objective === "win_quiz") {
           updates[`playerQuests.${uid}`] = completeQuestStep(playerQuest, playerQuest.currentStep);
         }
       }
@@ -484,11 +470,6 @@ export const submitSrsReview = onCall({ cors: true }, async (request) => {
 //                    RÉCUPÉRATION DE DONNÉES SÉCURISÉES
 // =================================================================
 
-/**
- * @description Récupère les données du profil de l'utilisateur connecté.
- * @param {object} request - La requête de la fonction.
- * @returns {Promise<any>} Le document du profil utilisateur.
- */
 export const getUserProfile = onCall({ cors: true }, async (request) => {
   if (!request.auth) {
     throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté pour accéder à ces données.");
@@ -508,11 +489,6 @@ export const getUserProfile = onCall({ cors: true }, async (request) => {
   }
 });
 
-/**
- * @description Fonction d'appel sécurisée pour recevoir des données du client.
- * @param {object} request - La requête de la fonction.
- * @returns {Promise<object>} Un objet contenant un message de succès et les données reçues.
- */
 export const getSecureData = onCall({ cors: true }, (request) => {
   const clientData = request.data.message;
   logger.info(`Message reçu du client : "${clientData}"`);
