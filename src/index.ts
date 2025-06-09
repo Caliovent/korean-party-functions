@@ -9,6 +9,7 @@ import * as admin from "firebase-admin";
 import { FieldValue, DocumentReference } from "firebase-admin/firestore";
 import * as functions from "firebase-functions";
 import { Player, Tile } from "./types";
+import { SPELL_DEFINITIONS, SpellId } from "./spells";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -925,5 +926,97 @@ export const resolveTileAction = onCall(async (request) => {
       "internal",
       "Une erreur interne est survenue lors de la résolution de l'action."
     );
+  }
+});
+
+/**
+ * castSpell
+ * * Gère le lancement d'un sort d'influence par un joueur sur un autre.
+ */
+export const castSpell = onCall(async (request) => {
+  // 1. Validation de l'authentification et des entrées
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour lancer un sort.");
+  }
+  const { gameId, spellId, targetId } = request.data;
+  if (typeof gameId !== "string" || typeof spellId !== "string" || typeof targetId !== "string") {
+    throw new HttpsError("invalid-argument", "Les données pour lancer le sort sont invalides.");
+  }
+
+  const uid = request.auth.uid;
+  const gameRef = db.collection("games").doc(gameId);
+
+  try {
+    const gameDoc = await gameRef.get();
+    const gameData = gameDoc.data();
+    if (!gameData) {
+      throw new HttpsError("not-found", "Cette partie n'existe pas.");
+    }
+
+    // 2. Validations métier
+    if (gameData.status !== "playing" || gameData.currentPlayerId !== uid) {
+      throw new HttpsError("failed-precondition", "Vous ne pouvez pas lancer de sort maintenant.");
+    }
+    // Règle de jeu : on ne peut lancer un sort qu'au début de son tour.
+    if (gameData.turnState !== "AWAITING_ROLL") {
+      throw new HttpsError("failed-precondition", "Vous pouvez uniquement lancer un sort avant de lancer le dé.");
+    }
+    if (uid === targetId) {
+      throw new HttpsError("invalid-argument", "Vous ne pouvez pas vous cibler avec ce type de sort.");
+    }
+
+    // 3. Validation du sort et du lanceur
+    const spell = SPELL_DEFINITIONS[spellId as SpellId];
+    if (!spell) {
+      throw new HttpsError("not-found", "Ce sort n'existe pas.");
+    }
+
+    const casterIndex = gameData.players.findIndex((p: Player) => p.uid === uid);
+    const targetIndex = gameData.players.findIndex((p: Player) => p.uid === targetId);
+    if (casterIndex === -1 || targetIndex === -1) {
+      throw new HttpsError("not-found", "Le lanceur ou la cible est introuvable dans cette partie.");
+    }
+
+    const players = [...gameData.players];
+    const caster = players[casterIndex];
+
+    if (caster.mana < spell.manaCost) {
+      throw new HttpsError("failed-precondition", "Vous n'avez pas assez de Mana.");
+    }
+
+    // 4. Application de la logique du sort
+    // Déduire le coût en Mana
+    players[casterIndex] = { ...caster, mana: caster.mana - spell.manaCost };
+
+    // Appliquer l'effet
+    switch (spell.id) {
+    case "BLESSING_OF_HANGEUL": {
+      const target = players[targetIndex];
+      players[targetIndex] = { ...target, mana: target.mana + 5 };
+      break;
+    }
+    case "KIMCHIS_MALICE": {
+      const target = players[targetIndex];
+      // On s'assure que le mana ne passe pas en négatif
+      players[targetIndex] = { ...target, mana: Math.max(0, target.mana - 8) };
+      break;
+    }
+    default:
+      throw new HttpsError("internal", "Logique de sort non implémentée.");
+    }
+
+    // 5. Mise à jour de la partie
+    await gameRef.update({
+      players: players,
+      lastSpellCast: { spellId, casterId: uid, targetId },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Erreur lors du lancement du sort:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors du lancement du sort.");
   }
 });
