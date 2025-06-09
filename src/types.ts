@@ -3,6 +3,7 @@
  * Ce fichier contient les définitions de types et interfaces partagées
  * pour l'ensemble des Cloud Functions du projet Korean Party.
  */
+import { SpellId } from "./spells";
 
 // Représente l'état d'un joueur dans une partie
 export interface Player {
@@ -29,7 +30,13 @@ export interface Game {
   turnState?: "AWAITING_ROLL" | "RESOLVING_TILE";
   lastDiceRoll?: number;
   board?: Tile[]; // AJOUT : Le plateau de jeu de la session
-  grimoirePositions?: number[]; // AJOUT : Positions des grimoires sur le plateau
-  winnerId?: string; // AJOUT : Pour stocker le gagnant à la fin
+  grimoirePositions?: number[]; // Positions des grimoires sur le plateau
+  winnerId?: string; // Pour stocker le gagnant à la fin
+  // Pour notifier le client d'un sort lancé
+  lastSpellCast?: {
+    spellId: SpellId;
+    casterId: string;
+    targetId: string;
+  };
   createdAt: FirebaseFirestore.Timestamp;
 }
