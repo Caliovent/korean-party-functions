@@ -854,10 +854,39 @@ export const resolveTileAction = onCall(async (request) => {
     }
 
     // 3. Application de l'effet de la case
-    const board = gameData.board; // On lit le plateau depuis les données de la partie
-    const currentPlayerIndex = gameData.players.findIndex((p: Player) => p.uid === uid);
-    const currentPlayer = gameData.players[currentPlayerIndex];
+    const board = gameData.board;
+    const players = [...gameData.players];
+    const grimoirePositions = [...(gameData.grimoirePositions || [])];
+    const currentPlayerIndex = players.findIndex((p: Player) => p.uid === uid);
+    let currentPlayer = players[currentPlayerIndex];
     const tile = board[currentPlayer.position];
+    let manaChange = 0;
+
+    // --- LOGIQUE DE COLLECTE DE GRIMOIRE ---
+    const grimoireIndex = grimoirePositions.indexOf(currentPlayer.position);
+    if (grimoireIndex > -1) {
+      // Le joueur a trouvé un grimoire !
+      currentPlayer = { ...currentPlayer, grimoires: currentPlayer.grimoires + 1 };
+      players[currentPlayerIndex] = currentPlayer;
+
+      // Retirer le grimoire du plateau
+      grimoirePositions.splice(grimoireIndex, 1);
+
+      // --- VÉRIFICATION DE VICTOIRE ---
+      const grimoireWinCondition = 3; // À externaliser dans une config plus tard
+      if (currentPlayer.grimoires >= grimoireWinCondition) {
+        await gameRef.update({
+          players: players,
+          grimoirePositions: grimoirePositions,
+          status: "finished",
+          winnerId: currentPlayer.uid,
+          turnState: "ENDED", // On fige l'état du tour
+        });
+        return { success: true, effect: "VICTORY" };
+      }
+    }
+    // --- FIN DE LA LOGIQUE DE COLLECTE ET VICTOIRE ---
+
     let newMana = currentPlayer.mana;
 
     switch (tile.type) {
@@ -873,22 +902,20 @@ export const resolveTileAction = onCall(async (request) => {
       // Aucun effet sur les cases sûres
       break;
     }
-
-    const updatedPlayers = [...gameData.players];
-    updatedPlayers[currentPlayerIndex] = { ...currentPlayer, mana: newMana };
+    manaChange = currentPlayer.mana - newMana;
+    players[currentPlayerIndex] = currentPlayer;
 
     // 4. Passage au joueur suivant
-    const nextPlayerIndex = (currentPlayerIndex + 1) % updatedPlayers.length;
-    const nextPlayerId = updatedPlayers[nextPlayerIndex].uid;
+    const nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
 
-    // 5. Mise à jour de la partie
     await gameRef.update({
-      players: updatedPlayers,
-      currentPlayerId: nextPlayerId,
+      players: players,
+      grimoirePositions: grimoirePositions, // Mettre à jour les grimoires restants
+      currentPlayerId: players[nextPlayerIndex].uid,
       turnState: "AWAITING_ROLL",
     });
 
-    return { success: true, tileEffect: tile.type, manaChange: newMana - currentPlayer.mana };
+    return { success: true, manaChange };
   } catch (error) {
     console.error("Erreur lors de la résolution de l'action:", error);
     if (error instanceof HttpsError) {
