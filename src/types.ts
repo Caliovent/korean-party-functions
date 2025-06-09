@@ -14,13 +14,14 @@ export interface Player {
 
 // Représente l'état complet d'une partie
 export interface Game {
-  id: string; // L'ID du document Firestore
+  id: string;
   name: string;
   hostId: string;
   status: "waiting" | "playing" | "finished";
   players: Player[];
-  currentPlayerId?: string; // L'UID du joueur dont c'est le tour
-  lastDiceRoll?: number; // Le résultat du dernier lancer de dé
-  turnState?: "ROLLING" | "MOVING" | "RESOLVING_TILE" | "ENDED";
+  currentPlayerId?: string;
+  // Ajout d'une machine à état pour le tour
+  turnState?: "AWAITING_ROLL" | "MOVING" | "RESOLVING_TILE";
+  lastDiceRoll?: number;
   createdAt: FirebaseFirestore.Timestamp;
 }

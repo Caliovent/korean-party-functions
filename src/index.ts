@@ -441,8 +441,9 @@ export const startGame = onCall(async (request) => {
     // 4. Mise à jour de la partie
     await gameRef.update({
       status: "playing",
-      players: players, // On sauvegarde la liste des joueurs avec le nouvel ordre
-      currentPlayerId: players[0].uid, // Le premier joueur de la liste mélangée commence
+      players: players,
+      currentPlayerId: players[0].uid,
+      turnState: "AWAITING_ROLL", // AJOUTEZ CETTE LIGNE
     });
 
     return { success: true, message: "La partie commence !" };
@@ -701,4 +702,94 @@ export const getSecureData = onCall({ cors: true }, (request) => {
     serverMessage: "Ceci est une réponse sécurisée depuis le serveur !",
     dataReceived: clientData,
   };
+});
+
+/**
+ * rollDice
+ * * Gère le lancer de dé d'un joueur, calcule sa nouvelle position.
+ */
+export const rollDice = onCall(async (request) => {
+  // 1. Validation de l'authentification et des entrées
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Vous devez être connecté pour jouer."
+    );
+  }
+
+  const gameId = request.data.gameId;
+  if (typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie est invalide.");
+  }
+
+  const uid = request.auth.uid;
+  const gameRef = db.collection("games").doc(gameId);
+
+  try {
+    const gameDoc = await gameRef.get();
+    if (!gameDoc.exists) {
+      throw new HttpsError("not-found", "Cette partie n'existe pas.");
+    }
+
+    const gameData = gameDoc.data();
+
+    // 2. Validation métier stricte
+    if (gameData?.status !== "playing") {
+      throw new HttpsError(
+        "failed-precondition",
+        "La partie n'est pas en cours."
+      );
+    }
+
+    if (gameData?.currentPlayerId !== uid) {
+      throw new HttpsError(
+        "permission-denied",
+        "Ce n'est pas votre tour de jouer."
+      );
+    }
+
+    if (gameData?.turnState !== "AWAITING_ROLL") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Vous ne pouvez pas lancer le dé maintenant."
+      );
+    }
+
+    // 3. Logique du jeu
+    const diceResult = Math.floor(Math.random() * 6) + 1;
+    const currentPlayer = gameData.players.find((p: Player) => p.uid === uid);
+    if (!currentPlayer) {
+      throw new HttpsError("internal", "Le joueur actuel n'a pas été trouvé.");
+    }
+
+    // NOTE : La taille du plateau sera externalisée dans une config plus tard.
+    const boardSize = 30;
+    const newPosition = (currentPlayer.position + diceResult) % boardSize;
+
+    // 4. Création du nouvel état du tableau des joueurs
+    const updatedPlayers = gameData.players.map((p: Player) => {
+      if (p.uid === uid) {
+        return { ...p, position: newPosition };
+      }
+      return p;
+    });
+
+    // 5. Mise à jour de la partie
+    await gameRef.update({
+      players: updatedPlayers,
+      lastDiceRoll: diceResult,
+      turnState: "RESOLVING_TILE", // On passe directement à la résolution de la case
+    });
+
+    return { success: true, diceResult: diceResult };
+  } catch (error) {
+    console.error("Erreur lors du lancer de dé:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "Une erreur interne est survenue lors du lancer de dé."
+    );
+  }
 });
