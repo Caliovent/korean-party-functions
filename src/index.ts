@@ -8,32 +8,11 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue, DocumentReference } from "firebase-admin/firestore";
 import * as functions from "firebase-functions";
-import { Player } from "./types";
+import { Player, Tile } from "./types";
 
 admin.initializeApp();
 const db = admin.firestore();
 
-// Définition temporaire du plateau de jeu.
-// Ceci sera externalisé plus tard dans la configuration de la partie.
-const boardLayout: { type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ" }[] = [
-  { type: "SAFE_ZONE" }, // Case 0 (Départ)
-  { type: "MANA_GAIN" },
-  { type: "MINI_GAME_QUIZ" },
-  { type: "MANA_GAIN" },
-  { type: "SAFE_ZONE" },
-  { type: "MANA_GAIN" },
-  { type: "MINI_GAME_QUIZ" },
-  { type: "MANA_GAIN" },
-  { type: "SAFE_ZONE" },
-  { type: "MANA_GAIN" },
-  // ... continuez à définir les 30 cases
-];
-// Remplissage rapide pour l'exemple
-for (let i = boardLayout.length; i < 30; i++) {
-  if (i % 3 === 0) boardLayout.push({ type: "MINI_GAME_QUIZ" });
-  else if (i % 2 === 0) boardLayout.push({ type: "MANA_GAIN" });
-  else boardLayout.push({ type: "SAFE_ZONE" });
-}
 
 // =================================================================
 //                    INTERFACES ET TYPES
@@ -193,6 +172,7 @@ export const createGame = onCall(async (request) => { // MODIFIÉ ICI
       displayName: displayName,
       position: 0,
       mana: 20,
+      grimoires: 0, // CORRECTION : Initialisation du champ manquant
     };
 
     // 5. Création du nouvel objet Game
@@ -279,6 +259,7 @@ export const joinGame = onCall(async (request) => {
       displayName: displayName,
       position: 0,
       mana: 20,
+      grimoires: 0, // Initialiser les grimoires à 0
     };
 
     // 5. Ajout atomique du joueur à la partie
@@ -380,6 +361,7 @@ export const deleteGame = onCall({ cors: true }, async (request) => {
 */
 function generateBoardLayout(): TileConfig[] {
   const boardSize = 30;
+
   const layout: TileConfig[] = [];
 
   for (let i = 0; i < boardSize; i++) {
@@ -454,6 +436,19 @@ export const startGame = onCall(async (request) => {
     }
 
     // 3. Initialisation de l'état de jeu
+    const board = generateBoardLayout(); // On génère le plateau UNE SEULE FOIS
+    const boardSize = 30; // Doit correspondre à la config
+    const grimoireCount = 3; // L'objectif pour gagner
+    const grimoirePositions: number[] = [];
+
+    // Générer des positions aléatoires uniques pour les grimoires
+    // On exclut la case de départ (0)
+    while (grimoirePositions.length < grimoireCount) {
+      const pos = Math.floor(Math.random() * (boardSize - 1)) + 1;
+      if (!grimoirePositions.includes(pos)) {
+        grimoirePositions.push(pos);
+      }
+    }
     // Algorithme de mélange de Fisher-Yates pour garantir l'équité
     for (let i = players.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -465,7 +460,9 @@ export const startGame = onCall(async (request) => {
       status: "playing",
       players: players,
       currentPlayerId: players[0].uid,
-      turnState: "AWAITING_ROLL", // AJOUTEZ CETTE LIGNE
+      turnState: "AWAITING_ROLL",
+      grimoirePositions: grimoirePositions, // On sauvegarde les positions
+      board: board, // On sauvegarde le plateau dans le document de la partie
     });
 
     return { success: true, message: "La partie commence !" };
@@ -843,6 +840,10 @@ export const resolveTileAction = onCall(async (request) => {
     const gameData = gameDoc.data();
     if (!gameData) throw new HttpsError("internal", "Données de jeu introuvables.");
 
+    // AJOUT : Valider que le plateau existe dans les données du jeu
+    if (!gameData.board) {
+      throw new HttpsError("internal", "Plateau de jeu non trouvé pour cette partie.");
+    }
 
     // 2. Validation métier
     if (gameData.status !== "playing" || gameData.currentPlayerId !== uid || gameData.turnState !== "RESOLVING_TILE") {
@@ -853,9 +854,10 @@ export const resolveTileAction = onCall(async (request) => {
     }
 
     // 3. Application de l'effet de la case
+    const board = gameData.board; // On lit le plateau depuis les données de la partie
     const currentPlayerIndex = gameData.players.findIndex((p: Player) => p.uid === uid);
     const currentPlayer = gameData.players[currentPlayerIndex];
-    const tile = boardLayout[currentPlayer.position];
+    const tile = board[currentPlayer.position];
     let newMana = currentPlayer.mana;
 
     switch (tile.type) {

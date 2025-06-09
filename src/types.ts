@@ -8,11 +8,17 @@
 export interface Player {
   uid: string;
   displayName: string;
-  position: number; // Numéro de la case sur le plateau
-  mana: number; // Mana de départ
+  position: number;
+  mana: number;
+  grimoires: number; // AJOUT : Nombre de grimoires collectés
 }
 
-// Représente l'état complet d'une partie
+// Définition d'une case de jeu
+export interface Tile {
+  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ";
+  // On pourra ajouter d'autres propriétés plus tard (ex: manaValue: 10)
+}
+
 export interface Game {
   id: string;
   name: string;
@@ -20,8 +26,10 @@ export interface Game {
   status: "waiting" | "playing" | "finished";
   players: Player[];
   currentPlayerId?: string;
-  // Ajout d'une machine à état pour le tour
-  turnState?: "AWAITING_ROLL" | "MOVING" | "RESOLVING_TILE";
+  turnState?: "AWAITING_ROLL" | "RESOLVING_TILE";
   lastDiceRoll?: number;
+  board?: Tile[]; // AJOUT : Le plateau de jeu de la session
+  grimoirePositions?: number[]; // AJOUT : Positions des grimoires sur le plateau
+  winnerId?: string; // AJOUT : Pour stocker le gagnant à la fin
   createdAt: FirebaseFirestore.Timestamp;
 }
