@@ -13,7 +13,7 @@ export const eventCards: EventCard[] = [
     id: 'EVENT_001',
     title: 'Mana Surge',
     description: 'A surge of mana flows through you!',
-    effect: { type: 'GIVE_MANA', value: 50 },
+    effect: { type: 'GIVE_MANA', value: 35 },
   },
   {
     id: 'EVENT_002',

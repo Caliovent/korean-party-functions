@@ -7,9 +7,14 @@ import { FieldValue } from "firebase-admin/firestore";
 import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour les triggers d'authentification
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
+import { getXpForLevel } from "./xpUtils";
 import { Player, Tile, Guild, GuildMember } from "./types";
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards, EventCard } from "./data/eventCards";
+
+// Mana Reward Constants
+const MANA_REWARD_MINI_GAME_QUIZ = 20;
+// const MANA_REWARD_HANGEUL_TYPHOON = 40; // Placeholder for future use
 
 // Helper pour générer un plateau de jeu par défaut
 const generateBoardLayout = (): Tile[] => {
@@ -589,7 +594,7 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
     throw new HttpsError("failed-precondition", "Impossible de résoudre l'action.");
   }
 
-  const board = gameData.board;
+  let board = [...gameData.board]; // Made mutable
   const players = [...gameData.players];
   const grimoirePositions = [...(gameData.grimoirePositions || [])];
   const currentPlayerIndex = players.findIndex((p: Player) => p.uid === uid);
@@ -611,6 +616,41 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
     grimoirePositions.splice(grimoireIndex, 1);
 
     if (currentPlayer.grimoires >= 3) {
+      // ***** START OF XP MODIFICATION AREA *****
+      const XP_REWARD_WINNER = 150;
+      const XP_REWARD_LOSER = 50;
+
+      const userUpdates = players.map(async (player) => {
+        const userRef = db.collection("users").doc(player.uid);
+        try {
+          const userDoc = await userRef.get();
+          if (userDoc.exists) {
+            let currentLevel = userDoc.data()?.level || 1;
+            let currentXp = userDoc.data()?.xp || 0;
+            const isWinner = player.uid === currentPlayer.uid;
+            const xpGained = isWinner ? XP_REWARD_WINNER : XP_REWARD_LOSER;
+
+            currentXp += xpGained;
+
+            let xpNeededForNextLevel = getXpForLevel(currentLevel);
+            while (currentXp >= xpNeededForNextLevel) {
+              currentXp -= xpNeededForNextLevel;
+              currentLevel++;
+              xpNeededForNextLevel = getXpForLevel(currentLevel); // Recalculate for the new currentLevel
+            }
+            await userRef.update({ xp: currentXp, level: currentLevel });
+            logger.info(`Player ${player.uid} updated to Level ${currentLevel}, XP ${currentXp}`);
+          } else {
+            logger.warn(`User document not found for player ${player.uid} during XP update.`);
+          }
+        } catch (error) {
+          logger.error(`Failed to update XP for user ${player.uid}`, error);
+        }
+      });
+
+      await Promise.all(userUpdates);
+      // ***** END OF XP MODIFICATION AREA *****
+
       await gameRef.update({ players, grimoirePositions, status: "finished", winnerId: currentPlayer.uid, turnState: "ENDED", lastEventCard: null });
       return { success: true, effect: "VICTORY" };
     }
@@ -618,8 +658,32 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
 
   let tileEffectApplied = false;
 
-  if (tile.type === "event") {
-    tileEffectApplied = true;
+  // RUNE_TRAP Check
+  if (tile.trap && tile.trap.spellId === "RUNE_TRAP") {
+    logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${tile.trap.ownerId}`);
+    const manaLoss = 50;
+    currentPlayer.mana = Math.max(0, currentPlayer.mana - manaLoss);
+    players[currentPlayerIndex] = currentPlayer; // Update player in local array
+
+    // Log the event for the client
+    // Note: This specific update for the log might be batched or combined with the final update.
+    // For atomicity of trap removal and player state change due to trap, consider what needs to be updated together.
+    // The main update at the end will save players and board. Adding log here is fine.
+    await gameRef.update({
+      log: FieldValue.arrayUnion({
+        message: `${currentPlayer.displayName} triggered a Rune Trap and lost ${manaLoss} Mana! (Owned by ${tile.trap.ownerId})`,
+        timestamp: FieldValue.serverTimestamp(),
+      }),
+    });
+
+    // Remove the trap from the tile
+    delete board[currentPlayer.position].trap; // Modify the mutable board copy
+
+    tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
+  }
+
+  if (tile.type === "event" && !tileEffectApplied) { // Only process event if trap hasn't superseded
+    tileEffectApplied = true; // Event itself is an effect
     const randomIndex = Math.floor(Math.random() * eventCards.length);
     const selectedCard = eventCards[randomIndex] as EventCard; // Ensure type
 
@@ -681,6 +745,28 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
         currentPlayer.mana += 10;
         players[currentPlayerIndex] = currentPlayer;
         break;
+      case "MINI_GAME_QUIZ": // New case
+        logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
+        currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
+        // Optional: Cap mana if a manaMax is defined for the player in-game object
+        // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
+        players[currentPlayerIndex] = currentPlayer;
+        tileEffectApplied = true; // Mark that an effect was applied for this tile
+        // Add a log or event for the client if needed
+        await gameRef.update({
+          players: players, // Update players array with new mana value
+          log: FieldValue.arrayUnion({
+            message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
+            timestamp: FieldValue.serverTimestamp(),
+          }),
+        });
+        break;
+      // TODO: Add case for HANGEUL_TYPHOON if it's a separate tile type
+      // case "HANGEUL_TYPHOON":
+      //   currentPlayer.mana += MANA_REWARD_HANGEUL_TYPHOON; // Placeholder for future use
+      //   players[currentPlayerIndex] = currentPlayer;
+      //   tileEffectApplied = true;
+      //   break;
       // other existing tile types
     }
   }
@@ -784,6 +870,7 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
 
   await gameRef.update({
     players: players, // This now includes players with updated effects
+    board: board, // Save potentially modified board (e.g. trap removal)
     grimoirePositions: grimoirePositions,
     currentPlayerId: nextPlayerId,
     turnState: nextTurnState,
@@ -843,11 +930,11 @@ export const castSpell = onCall(async (request: functions.https.CallableRequest)
   switch (spell.id) {
     case "BLESSING_OF_HANGEUL":
       if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
-      players[targetIndex].mana += 5;
+      players[targetIndex].mana += 10; // Changed from 5 to 10
       break;
     case "KIMCHIS_MALICE":
       if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
-      players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 8);
+      players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
       break;
     case "RUNE_TRAP":
       if (typeof options?.tileIndex !== 'number' || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
@@ -866,10 +953,10 @@ export const castSpell = onCall(async (request: functions.https.CallableRequest)
       const existingEffects = players[casterIndex].effects || [];
       const hasShield = existingEffects.some((effect: {type: string}) => effect.type === 'SHIELDED');
       if (!hasShield) {
-        players[casterIndex].effects = [...existingEffects, { type: 'SHIELDED', duration: 2, spellId: spell.id }];
+        players[casterIndex].effects = [...existingEffects, { type: 'SHIELDED', duration: 1, spellId: spell.id }]; // Duration changed to 1
       } else {
         players[casterIndex].effects = existingEffects.map((effect: {type: string, duration: number}) =>
-          effect.type === 'SHIELDED' ? { ...effect, duration: 2 } : effect
+          effect.type === 'SHIELDED' ? { ...effect, duration: 1 } : effect // Duration changed to 1
         );
       }
       break;

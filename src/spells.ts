@@ -34,7 +34,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
   RUNE_TRAP: {
     id: 'RUNE_TRAP',
     name: 'Piège Runique',
-    manaCost: 30,
+    manaCost: 35,
     type: 'TERRAIN',
     description: 'Pose un piège sur une case. Le prochain joueur à s\'y arrêter perd 50 Mana.',
   },
@@ -43,12 +43,12 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     name: 'Bouclier de Mana',
     manaCost: 50,
     type: 'DEFENSIVE',
-    description: 'Annule le prochain sort négatif qui vous cible. Dure 2 tours.',
+    description: 'Annule le prochain sort négatif qui vous cible. Dure 1 tour.',
   },
   ASTRAL_SWAP: {
     id: 'ASTRAL_SWAP',
     name: 'Échange Astral',
-    manaCost: 75,
+    manaCost: 90,
     type: 'STRATEGIC',
     description: 'Échangez votre position avec celle d\'un autre joueur.',
   },
