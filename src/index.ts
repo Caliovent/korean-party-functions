@@ -8,7 +8,7 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { FieldValue, DocumentReference } from "firebase-admin/firestore";
 import * as functions from "firebase-functions";
-import { Player, Tile } from "./types";
+import { Player, Tile, Guild, GuildMember } from "./types";
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 
 admin.initializeApp();
@@ -125,6 +125,230 @@ export const updateUserProfile = onCall({ cors: true }, async (request) => {
   return { status: "succès" };
 });
 
+// =================================================================
+//                    GESTION DES GUILDES (MAISONS DE SORCIERS)
+// =================================================================
+
+export const createGuild = onCall({ cors: true }, async (request) => {
+  // 1. Authenticate the user
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour créer une guilde.");
+  }
+  const uid = request.auth.uid;
+
+  // 2. Validate input
+  const { name, tag } = request.data;
+  if (typeof name !== "string" || name.length < 3 || name.length > 30) {
+    throw new HttpsError("invalid-argument", "Le nom de la guilde doit contenir entre 3 et 30 caractères.");
+  }
+  if (typeof tag !== "string" || tag.length < 2 || tag.length > 5) {
+    throw new HttpsError("invalid-argument", "Le tag de la guilde doit contenir entre 2 et 5 caractères.");
+  }
+
+  const userRef = db.collection("users").doc(uid);
+  const guildsRef = db.collection("guilds");
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      // 3. Get user profile
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) {
+        throw new HttpsError("not-found", "Profil utilisateur non trouvé.");
+      }
+      const userData = userDoc.data();
+      if (userData?.guildId) {
+        throw new HttpsError("failed-precondition", "Vous êtes déjà membre d'une guilde.");
+      }
+      const displayName = userData?.pseudo || "Sorcier Anonyme"; // Use pseudo as displayName
+
+      // 4. Check for uniqueness of guild name and tag
+      const nameQuery = guildsRef.where("name", "==", name);
+      const tagQuery = guildsRef.where("tag", "==", tag);
+
+      const nameSnapshot = await transaction.get(nameQuery);
+      if (!nameSnapshot.empty) {
+        throw new HttpsError("already-exists", `Une guilde avec le nom "${name}" existe déjà.`);
+      }
+
+      const tagSnapshot = await transaction.get(tagQuery);
+      if (!tagSnapshot.empty) {
+        throw new HttpsError("already-exists", `Une guilde avec le tag "${tag}" existe déjà.`);
+      }
+
+      // 5. Create the new guild
+      const newGuildRef = guildsRef.doc(); // Auto-generate ID
+      const initialMember: GuildMember = { uid, displayName };
+      const newGuildData: Guild = {
+        id: newGuildRef.id,
+        name,
+        tag,
+        leaderId: uid,
+        members: [initialMember],
+        createdAt: admin.firestore.Timestamp.now(), // Use admin.firestore.Timestamp
+      };
+      transaction.set(newGuildRef, newGuildData);
+
+      // 6. Update user's profile with guildId
+      transaction.update(userRef, { guildId: newGuildRef.id });
+
+      return { guildId: newGuildRef.id, message: "Guilde créée avec succès !" };
+    });
+  } catch (error) {
+    logger.error(`Erreur lors de la création de la guilde par ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la création de la guilde.");
+  }
+});
+
+export const joinGuild = onCall({ cors: true }, async (request) => {
+  // 1. Authenticate the user
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour rejoindre une guilde.");
+  }
+  const uid = request.auth.uid;
+
+  // 2. Validate input
+  const { guildId } = request.data;
+  if (typeof guildId !== "string" || guildId.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'ID de la guilde est invalide.");
+  }
+
+  const userRef = db.collection("users").doc(uid);
+  const guildRef = db.collection("guilds").doc(guildId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      // 3. Get user profile
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) {
+        throw new HttpsError("not-found", "Profil utilisateur non trouvé.");
+      }
+      const userData = userDoc.data();
+      if (userData?.guildId) {
+        throw new HttpsError("failed-precondition", "Vous êtes déjà membre d'une guilde.");
+      }
+      const displayName = userData?.pseudo || "Sorcier Anonyme"; // Use pseudo
+
+      // 4. Get guild
+      const guildDoc = await transaction.get(guildRef);
+      if (!guildDoc.exists) {
+        throw new HttpsError("not-found", `Guilde avec l'ID "${guildId}" non trouvée.`);
+      }
+      const guildData = guildDoc.data() as Guild; // Cast to Guild type
+
+      // 5. Check if user is already a member (should be redundant due to user profile check, but good for integrity)
+      if (guildData.members.some(member => member.uid === uid)) {
+        // This case should ideally not be reached if user profile guildId is managed correctly.
+        // If reached, it implies an inconsistency. We can update user profile as a corrective measure.
+        transaction.update(userRef, { guildId: guildId });
+        throw new HttpsError("failed-precondition", "Vous êtes déjà listé comme membre de cette guilde (profil mis à jour).");
+      }
+
+      // (Future: Add member limit check here if implemented: e.g., if (guildData.members.length >= MAX_MEMBERS) ...)
+
+      // 6. Add user to guild's members array
+      const newMember: GuildMember = { uid, displayName };
+      transaction.update(guildRef, {
+        members: FieldValue.arrayUnion(newMember) // Atomically add new member
+      });
+
+      // 7. Update user's profile with guildId
+      transaction.update(userRef, { guildId: guildId });
+
+      return { message: `Vous avez rejoint la guilde "${guildData.name}" avec succès !` };
+    });
+  } catch (error) {
+    logger.error(`Erreur lorsque ${uid} a tenté de rejoindre la guilde ${guildId}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue en tentant de rejoindre la guilde.");
+  }
+});
+
+export const leaveGuild = onCall({ cors: true }, async (request) => {
+  // 1. Authenticate the user
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour quitter une guilde.");
+  }
+  const uid = request.auth.uid;
+
+  const userRef = db.collection("users").doc(uid);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      // 2. Get user profile
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) {
+        throw new HttpsError("not-found", "Profil utilisateur non trouvé.");
+      }
+      const userData = userDoc.data();
+      const currentGuildId = userData?.guildId;
+
+      if (!currentGuildId) {
+        throw new HttpsError("failed-precondition", "Vous n'êtes membre d'aucune guilde.");
+      }
+
+      const guildRef = db.collection("guilds").doc(currentGuildId);
+      const guildDoc = await transaction.get(guildRef);
+
+      if (!guildDoc.exists) {
+        // Data inconsistency: user has a guildId but guild doesn't exist. Clean up user profile.
+        logger.warn(`Utilisateur ${uid} avait guildId ${currentGuildId} mais la guilde n'existe pas. Nettoyage du profil.`);
+        transaction.update(userRef, { guildId: FieldValue.delete() });
+        throw new HttpsError("not-found", "La guilde que vous essayez de quitter n'existe plus. Votre profil a été mis à jour.");
+      }
+
+      const guildData = guildDoc.data() as Guild;
+      const userAsMember = guildData.members.find(member => member.uid === uid);
+
+      if (!userAsMember) {
+        // Data inconsistency: user has guildId, guild exists, but user not in members list. Clean up.
+        logger.warn(`Utilisateur ${uid} (guildId: ${currentGuildId}) non trouvé dans la liste des membres de la guilde ${guildData.name}. Nettoyage du profil.`);
+        transaction.update(userRef, { guildId: FieldValue.delete() });
+        throw new HttpsError("internal", "Erreur interne : vous n'étiez pas listé dans les membres de la guilde. Votre profil a été mis à jour.");
+      }
+
+      // 3. Remove user from guild's members array
+      transaction.update(guildRef, {
+        members: FieldValue.arrayRemove(userAsMember)
+      });
+
+      // 4. Update user's profile
+      transaction.update(userRef, {
+        guildId: FieldValue.delete() // Remove guildId field
+      });
+
+      // 5. Handle leader leaving scenarios
+      // let guildUpdateData: { [key: string]: any } = {}; // Not strictly needed due to direct transaction updates
+      let finalMessage = `Vous avez quitté la guilde "${guildData.name}".`;
+
+      if (guildData.leaderId === uid) {
+        const remainingMembers = guildData.members.filter(member => member.uid !== uid);
+        if (remainingMembers.length === 0) {
+          // Leader leaves and is the last member, delete the guild
+          transaction.delete(guildRef);
+          finalMessage = `Vous avez quitté la guilde "${guildData.name}" et étiez le dernier membre. La guilde a été dissoute.`;
+        } else {
+          // Leader leaves, other members remain. Guild becomes leaderless for now.
+          transaction.update(guildRef, { leaderId: null });
+          finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. La guilde est maintenant sans leader.`;
+           logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. La guilde est maintenant sans leader désigné.`);
+        }
+      }
+
+      return { message: finalMessage };
+    });
+  } catch (error) {
+    logger.error(`Erreur lorsque ${uid} a tenté de quitter sa guilde:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue en tentant de quitter la guilde.");
+  }
+});
 
 // =================================================================
 //                    GESTION DU LOBBY ET DES PARTIES
