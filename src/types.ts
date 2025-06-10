@@ -40,3 +40,35 @@ export interface Game {
   };
   createdAt: FirebaseFirestore.Timestamp;
 }
+
+// Represents a member of a Guild
+export interface GuildMember {
+  uid: string;
+  displayName: string;
+}
+
+// Represents a Guild
+export interface Guild {
+  id: string; // Document ID
+  name: string; // Guild name, unique
+  tag: string; // Guild tag, unique, short (e.g., 3-5 chars)
+  leaderId: string; // UID of the player who is the leader
+  members: GuildMember[]; // Array of guild members
+  createdAt: FirebaseFirestore.Timestamp; // Server timestamp of creation
+}
+
+// It seems UserProfile is implicitly defined in src/index.ts's createProfileOnSignup.
+// For clarity, and if other parts of the backend might benefit, we can add it here.
+// Otherwise, we'll just assume 'users' documents have an optional 'guildId'.
+// For now, let's add a UserProfile interface for completeness.
+export interface UserProfile {
+  email: string;
+  pseudo: string;
+  level: number;
+  xp: number;
+  manaCurrent: number;
+  manaMax: number;
+  fragments: { vocab: number; grammar: number; culture: number };
+  createdAt: FirebaseFirestore.Timestamp;
+  guildId?: string; // Optional: ID of the guild the user belongs to
+}
