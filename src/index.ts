@@ -188,6 +188,12 @@ export const createGame = onCall(async (request) => { // MODIFIÉ ICI
     // 6. Ajout du document à Firestore
     const gameRef = await db.collection("games").add(newGame);
 
+    // 6a. Update hub_state for the host
+    await db.collection("hub_state").doc(uid).set({
+      inGame: gameRef.id,
+      lastSeen: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
     // 7. Retourner l'ID de la nouvelle partie
     return { gameId: gameRef.id };
   } catch (error) {
@@ -268,6 +274,12 @@ export const joinGame = onCall(async (request) => {
       players: FieldValue.arrayUnion(newPlayer),
     });
 
+    // 5a. Update hub_state for the joining player
+    await db.collection("hub_state").doc(uid).set({
+      inGame: gameId,
+      lastSeen: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
     return { success: true };
   } catch (error) {
     console.error("Erreur pour rejoindre la partie:", error);
@@ -316,6 +328,11 @@ export const leaveGame = onCall(async (request) => {
     // 2. Si le joueur qui part est l'hôte, supprimer la partie
     if (gameData?.hostId === uid) {
       await gameRef.delete();
+      // Update hub_state for the host
+      await db.collection("hub_state").doc(uid).set({
+        inGame: null,
+        lastSeen: FieldValue.serverTimestamp(),
+      }, { merge: true });
       return { success: true, message: "Partie dissoute par l'hôte." };
     }
 
@@ -325,6 +342,11 @@ export const leaveGame = onCall(async (request) => {
       await gameRef.update({
         players: FieldValue.arrayRemove(playerToRemove),
       });
+       // Update hub_state for the leaving player
+       await db.collection("hub_state").doc(uid).set({
+         inGame: null,
+         lastSeen: FieldValue.serverTimestamp(),
+       }, { merge: true });
       return { success: true, message: "Vous avez quitté la partie." };
     }
 
@@ -352,6 +374,156 @@ export const deleteGame = onCall({ cors: true }, async (request) => {
 
   await gameRef.delete();
   return { status: "succès" };
+});
+
+
+// =================================================================
+//                    PLAYER HUB FUNCTIONS
+// =================================================================
+
+export const updatePlayerHubPosition = onCall(async (request) => {
+  // 1. Require user authentication
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in to update your position."
+    );
+  }
+  const uid = request.auth.uid;
+
+  // 2. Validate input: x and y coordinates
+  const { x, y } = request.data;
+  if (typeof x !== "number" || typeof y !== "number") {
+    throw new HttpsError(
+      "invalid-argument",
+      "Invalid input: x and y must be numbers."
+    );
+  }
+
+  try {
+    // 3. Fetch the calling user's displayName
+    const userDocRef = db.collection("users").doc(uid);
+    const userDoc = await userDocRef.get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError(
+        "not-found",
+        "User profile not found. Cannot update position."
+      );
+    }
+    const userData = userDoc.data();
+    // Ensure displayName exists, otherwise provide a default or handle error
+    const displayName = userData?.displayName || userData?.pseudo || "Anonymous User";
+
+
+    // 4. Construct the data to save
+    const positionData = {
+      uid: uid,
+      displayName: displayName,
+      x: x,
+      y: y,
+      lastSeen: FieldValue.serverTimestamp(),
+    };
+
+    // 5. Write data to hub_state collection
+    await db.collection("hub_state").doc(uid).set(positionData, { merge: true });
+
+    // 6. Return success message
+    return { status: "success", message: "Position updated." };
+  } catch (error) {
+    logger.error(`Error updating player hub position for ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "An internal error occurred while updating position."
+    );
+  }
+});
+
+export const playerJoinsHub = onCall(async (request) => {
+  // 1. Require user authentication
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in to join the hub."
+    );
+  }
+  const uid = request.auth.uid;
+
+  try {
+    // 2. Fetch the calling user's displayName
+    const userDocRef = db.collection("users").doc(uid);
+    const userDoc = await userDocRef.get();
+
+    if (!userDoc.exists) {
+      throw new HttpsError(
+        "not-found",
+        "User profile not found. Cannot join hub."
+      );
+    }
+    const userData = userDoc.data();
+    const displayName = userData?.displayName || userData?.pseudo || "Anonymous User";
+
+    // 3. Define default spawn coordinates
+    const defaultX = 0;
+    const defaultY = 0;
+
+    // 4. Construct the data to save
+    const hubPlayerData = {
+      uid: uid,
+      displayName: displayName,
+      x: defaultX,
+      y: defaultY,
+      lastSeen: FieldValue.serverTimestamp(),
+      inGame: null, // Player is not in any game by default when joining hub
+    };
+
+    // 5. Write data to hub_state collection (overwrite if exists)
+    await db.collection("hub_state").doc(uid).set(hubPlayerData);
+
+    // 6. Return success message
+    return { status: "success", message: "Player joined hub." };
+  } catch (error) {
+    logger.error(`Error playerJoinsHub for ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError(
+      "internal",
+      "An internal error occurred while joining the hub."
+    );
+  }
+});
+
+export const playerLeavesHub = onCall(async (request) => {
+  // 1. Require user authentication
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in to leave the hub."
+    );
+  }
+  const uid = request.auth.uid;
+
+  try {
+    // 2. Delete the document for the user from hub_state
+    // No need to check for existence first, delete is idempotent.
+    // If it doesn't exist, it won't throw an error.
+    await db.collection("hub_state").doc(uid).delete();
+
+    // 3. Return success message
+    return { status: "success", message: "Player left hub." };
+  } catch (error) {
+    logger.error(`Error playerLeavesHub for ${uid}:`, error);
+    // No specific HttpsError to re-throw here unless delete itself fails in a specific way
+    // that we want to communicate differently.
+    throw new HttpsError(
+      "internal",
+      "An internal error occurred while leaving the hub."
+    );
+  }
 });
 
 /** Génère la disposition du plateau de jeu.
