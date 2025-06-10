@@ -76,7 +76,7 @@ const db = admin.firestore();
  * Complète une étape de quête et met à jour l'état de la quête.
  * @param quest La quête à mettre à jour.
  * @param stepIndex L'index de l'étape à compléter.
- * @returns La quête mise à jour.
+ * @return La quête mise à jour.
  */
 // function completeQuestStep(quest: Quest, stepIndex: number): Quest {
 //   const newSteps = [...quest.steps];
@@ -256,7 +256,7 @@ export const joinGuild = onCall({ cors: true }, async (request: functions.https.
       const guildData = guildDoc.data() as Guild; // Cast to Guild type
 
       // 5. Check if user is already a member (should be redundant due to user profile check, but good for integrity)
-      if (guildData.members.some(member => member.uid === uid)) {
+      if (guildData.members.some((member) => member.uid === uid)) {
         // This case should ideally not be reached if user profile guildId is managed correctly.
         // If reached, it implies an inconsistency. We can update user profile as a corrective measure.
         transaction.update(userRef, { guildId: guildId });
@@ -319,7 +319,7 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
       }
 
       const guildData = guildDoc.data() as Guild;
-      const userAsMember = guildData.members.find(member => member.uid === uid);
+      const userAsMember = guildData.members.find((member) => member.uid === uid);
 
       if (!userAsMember) {
         // Data inconsistency: user has guildId, guild exists, but user not in members list. Clean up.
@@ -343,7 +343,7 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
       let finalMessage = `Vous avez quitté la guilde "${guildData.name}".`;
 
       if (guildData.leaderId === uid) {
-        const remainingMembers = guildData.members.filter(member => member.uid !== uid);
+        const remainingMembers = guildData.members.filter((member) => member.uid !== uid);
         if (remainingMembers.length === 0) {
           // Leader leaves and is the last member, delete the guild
           transaction.delete(guildRef);
@@ -352,7 +352,7 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
           // Leader leaves, other members remain. Guild becomes leaderless for now.
           transaction.update(guildRef, { leaderId: null });
           finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. La guilde est maintenant sans leader.`;
-           logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. La guilde est maintenant sans leader désigné.`);
+          logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. La guilde est maintenant sans leader désigné.`);
         }
       }
 
