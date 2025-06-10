@@ -2,8 +2,8 @@
 import { setGlobalOptions } from "firebase-functions/v2"; // CORRECT : Importation depuis la racine v2
 import { onCall, HttpsError } from "firebase-functions/v2/https"; // onCall et HttpsError restent ici
 import * as admin from "firebase-admin";
-import { FieldValue, DocumentReference } from "firebase-admin/firestore";
-import * as functions from "firebase-functions";
+import { FieldValue } from "firebase-admin/firestore"; // DocumentReference removed
+import * as functionsV1 from "firebase-functions";
 import * as logger from "firebase-functions/logger";
 import { Player, Tile, Guild, GuildMember } from "./types";
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
@@ -30,42 +30,42 @@ const db = admin.firestore();
 //                    INTERFACES ET TYPES
 // =================================================================
 
-interface QuestStep {
-  description: string;
-  objective: string;
-  completed: boolean;
-}
+// interface QuestStep {
+//   description: string;
+//   objective: string;
+//   completed: boolean;
+// }
 
-interface Quest {
-  questId: string;
-  title: string;
-  currentStep: number;
-  steps: QuestStep[];
-}
+// interface Quest {
+//   questId: string;
+//   title: string;
+//   currentStep: number;
+//   steps: QuestStep[];
+// }
 
-interface ReviewItem {
-  id: string;
-  lastReviewed: admin.firestore.Timestamp;
-  correctStreak: number;
-}
+// interface ReviewItem {
+//   id: string;
+//   lastReviewed: admin.firestore.Timestamp;
+//   correctStreak: number;
+// }
 
-interface TileConfig {
-  type: "start" | "finish" | "quiz" | "bonus" | "malus" | "event" | "duel" | "teleport" | "shop";
-  data?: {
-    mana?: number;
-    xp?: number;
-    quizId?: string;
-    targetPosition?: number;
-  };
-}
+// interface TileConfig {
+//   type: "start" | "finish" | "quiz" | "bonus" | "malus" | "event" | "duel" | "teleport" | "shop";
+//   data?: {
+//     mana?: number;
+//     xp?: number;
+//     quizId?: string;
+//     targetPosition?: number;
+//   };
+// }
 
-type TileEffectHandler = (
-  t: admin.firestore.Transaction,
-  gameRef: DocumentReference,
-  gameData: admin.firestore.DocumentData | undefined,
-  playerId: string,
-  tileData?: { [key: string]: unknown }
-) => Promise<void>;
+// type TileEffectHandler = (
+//   t: admin.firestore.Transaction,
+//   gameRef: DocumentReference,
+//   gameData: admin.firestore.DocumentData | undefined,
+//   playerId: string,
+//   tileData?: { [key: string]: unknown }
+// ) => Promise<void>;
 
 
 // =================================================================
@@ -78,15 +78,15 @@ type TileEffectHandler = (
  * @param stepIndex L'index de l'étape à compléter.
  * @returns La quête mise à jour.
  */
-function completeQuestStep(quest: Quest, stepIndex: number): Quest {
-  const newSteps = [...quest.steps];
-  newSteps[stepIndex] = { ...newSteps[stepIndex], completed: true };
-  return {
-    ...quest,
-    steps: newSteps,
-    currentStep: quest.currentStep + 1,
-  };
-}
+// function completeQuestStep(quest: Quest, stepIndex: number): Quest {
+//   const newSteps = [...quest.steps];
+//   newSteps[stepIndex] = { ...newSteps[stepIndex], completed: true };
+//   return {
+//     ...quest,
+//     steps: newSteps,
+//     currentStep: quest.currentStep + 1,
+//   };
+// }
 
 /**
  * Avance au joueur suivant dans l'ordre de jeu.
@@ -94,18 +94,24 @@ function completeQuestStep(quest: Quest, stepIndex: number): Quest {
  * @param gameData Les données de la partie.
  * @param t La transaction Firestore en cours.
  */
-async function advanceToNextPlayer(gameRef: DocumentReference, gameData: admin.firestore.DocumentData | undefined, t: admin.firestore.Transaction) {
-  const currentPlayerIndex = gameData.turnOrder.indexOf(gameData.currentPlayerId);
-  const nextPlayerIndex = (currentPlayerIndex + 1) % gameData.turnOrder.length;
-  const nextPlayerId = gameData.turnOrder[nextPlayerIndex];
-  t.update(gameRef, { currentPlayerId: nextPlayerId });
-}
+// async function advanceToNextPlayer(gameRef: DocumentReference, gameData: admin.firestore.DocumentData | undefined, t: admin.firestore.Transaction) {
+//   if (!gameData || !gameData.turnOrder || !gameData.currentPlayerId) {
+//     console.error("advanceToNextPlayer: gameData or essential properties are missing.");
+//     return;
+//   }
+//   const currentPlayerIndex = gameData?.turnOrder?.indexOf(gameData?.currentPlayerId);
+//   const nextPlayerIndex = (currentPlayerIndex !== undefined && gameData?.turnOrder) ? (currentPlayerIndex + 1) % gameData.turnOrder.length : undefined;
+//   const nextPlayerId = (nextPlayerIndex !== undefined && gameData?.turnOrder) ? gameData.turnOrder[nextPlayerIndex] : undefined;
+//   if (nextPlayerId !== undefined) {
+//     t.update(gameRef, { currentPlayerId: nextPlayerId });
+//   }
+// }
 
 // =================================================================
 //                    GESTION DES UTILISATEURS ET PROFILS
 // =================================================================
 
-export const createProfileOnSignup = functions.auth.user().onCreate(async (user: admin.auth.UserRecord) => {
+export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (user: admin.auth.UserRecord) => {
   const { uid, email } = user;
   if (!email) {
     logger.info(`Utilisateur anonyme ${uid} créé, pas de profil nécessaire.`);
@@ -125,12 +131,12 @@ export const createProfileOnSignup = functions.auth.user().onCreate(async (user:
   return null;
 });
 
-export const updateUserProfile = onCall({ cors: true }, async (request) => {
-  if (!request.auth) throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+export const updateUserProfile = onCall({ cors: true }, async (request: functionsV1.https.CallableRequest) => {
+  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
   const { pseudo } = request.data;
   const { uid } = request.auth;
   if (typeof pseudo !== "string" || pseudo.length < 3 || pseudo.length > 20) {
-    throw new functions.https.HttpsError("invalid-argument", "Le pseudo doit contenir entre 3 et 20 caractères.");
+    throw new functionsV1.https.HttpsError("invalid-argument", "Le pseudo doit contenir entre 3 et 20 caractères.");
   }
   await admin.firestore().collection("users").doc(uid).update({ pseudo });
   return { status: "succès" };
@@ -188,7 +194,7 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
 
       // 5. Create the new guild
       const newGuildRef = guildsRef.doc(); // Auto-generate ID
-      const initialMember: GuildMember = { uid, displayName };
+      const initialMember: GuildMember = { uid, displayName, };
       const newGuildData: Guild = {
         id: newGuildRef.id,
         name,
@@ -262,11 +268,11 @@ export const joinGuild = onCall({ cors: true }, async (request: functions.https.
       // 6. Add user to guild's members array
       const newMember: GuildMember = { uid, displayName };
       transaction.update(guildRef, {
-        members: FieldValue.arrayUnion(newMember) // Atomically add new member
+        members: FieldValue.arrayUnion(newMember), // Atomically add new member
       });
 
       // 7. Update user's profile with guildId
-      transaction.update(userRef, { guildId: guildId });
+      transaction.update(userRef, { guildId: guildId, });
 
       return { message: `Vous avez rejoint la guilde "${guildData.name}" avec succès !` };
     });
@@ -324,12 +330,12 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
 
       // 3. Remove user from guild's members array
       transaction.update(guildRef, {
-        members: FieldValue.arrayRemove(userAsMember)
+        members: FieldValue.arrayRemove(userAsMember),
       });
 
       // 4. Update user's profile
       transaction.update(userRef, {
-        guildId: FieldValue.delete() // Remove guildId field
+        guildId: FieldValue.delete(), // Remove guildId field
       });
 
       // 5. Handle leader leaving scenarios
@@ -546,10 +552,10 @@ export const leaveGame = onCall(async (request: functions.https.CallableRequest)
 
   const playerToRemove = gameData?.players.find((p: Player) => p.uid === uid);
   if (playerToRemove) {
-    await gameRef.update({ players: FieldValue.arrayRemove(playerToRemove) });
-    return { success: true, message: "Vous avez quitté la partie." };
+    await gameRef.update({ players: FieldValue.arrayRemove(playerToRemove), });
+    return { success: true, message: "Vous avez quitté la partie.", };
   }
-  return { success: true };
+  return { success: true, };
   } catch (error) {
     logger.error("Error leaving game:", error);
     if (error instanceof HttpsError) {
