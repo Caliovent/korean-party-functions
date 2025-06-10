@@ -12,11 +12,22 @@ export interface Player {
   position: number;
   mana: number;
   grimoires: number; // AJOUT : Nombre de grimoires collectés
+  effects?: Array<{ // Added
+    type: string; // e.g., 'SHIELDED', 'SKIP_TURN'
+    duration: number;
+    spellId?: SpellId; // Optional: to know which spell caused the effect
+    [key: string]: any; // Optional: for future flexibility
+  }>;
+  skipNextTurn?: boolean; // Will be conceptually replaced by effects array
 }
 
 // Définition d'une case de jeu
 export interface Tile {
-  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ";
+  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ" | "event"; // Added "event" type
+  trap?: { // Added for RUNE_TRAP
+    ownerId: string;
+    spellId: SpellId; // To identify the trap type if multiple trap spells exist
+  };
   // On pourra ajouter d'autres propriétés plus tard (ex: manaValue: 10)
 }
 
@@ -27,7 +38,7 @@ export interface Game {
   status: "waiting" | "playing" | "finished";
   players: Player[];
   currentPlayerId?: string;
-  turnState?: "AWAITING_ROLL" | "RESOLVING_TILE";
+  turnState?: "AWAITING_ROLL" | "RESOLVING_TILE" | "ENDED"; // Added "ENDED" state
   lastDiceRoll?: number;
   board?: Tile[]; // AJOUT : Le plateau de jeu de la session
   grimoirePositions?: number[]; // Positions des grimoires sur le plateau
@@ -36,7 +47,13 @@ export interface Game {
   lastSpellCast?: {
     spellId: SpellId;
     casterId: string;
-    targetId: string;
+    targetId?: string; // Can be null for terrain spells like RUNE_TRAP
+    options?: any; // For additional data like tileIndex for RUNE_TRAP
+  };
+  lastEventCard?: { // Added to store information about the last drawn event card
+    title: string;
+    description: string;
+    // id?: string; // if needed to reference back to eventCards data
   };
   createdAt: FirebaseFirestore.Timestamp;
 }
