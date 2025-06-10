@@ -1,0 +1,49 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow public read access for user profiles, but only owners can write.
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Allow authenticated users to read game data.
+    // Modifications to games are handled by Cloud Functions.
+    match /games/{gameId} {
+      allow read: if request.auth != null;
+      // Typically, game writes are restricted to backend logic.
+      // Allow create/update/delete only if explicitly needed for client and secured.
+      // For now, assume Cloud Functions handle writes.
+      allow write: if false; // Or more specific rules if clients need to write directly
+    }
+
+    // Rules for hub_state collection
+    match /hub_state/{playerId} {
+      // Any authenticated user can read hub_state to see other players.
+      allow read: if request.auth != null;
+
+      // A player can create, update, and delete their own hub_state document.
+      allow create: if request.auth != null && request.auth.uid == playerId
+                      && request.resource.data.uid == request.auth.uid // Ensure uid in doc matches
+                      && request.resource.data.x is number // Validate data types
+                      && request.resource.data.y is number
+                      && request.resource.data.displayName is string
+                      && request.resource.data.lastSeen is timestamp;
+                      // inGame can be null or string, harder to validate precisely here for create only
+                      // It's often set by backend functions anyway.
+
+      allow update: if request.auth != null && request.auth.uid == playerId
+                      // Check that fields being updated are permissible if needed
+                      // For example, prevent client from updating inGame directly if only backend should
+                      && !(request.resource.data.diff(resource.data).affectedKeys().hasAny(['uid'])); // uid cannot be changed
+
+      allow delete: if request.auth != null && request.auth.uid == playerId;
+    }
+
+    // Placeholder for other collections if any (e.g., learningItemsStatus)
+    // match /users/{userId}/learningItemsStatus/{itemId} {
+    //   allow read, write: if request.auth != null && request.auth.uid == userId;
+    // }
+  }
+}
