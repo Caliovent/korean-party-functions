@@ -71,6 +71,16 @@ export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (use
     manaMax: 100,
     fragments: { vocab: 0, grammar: 0, culture: 0 },
     createdAt: FieldValue.serverTimestamp(),
+    // Add the stats object here
+    stats: {
+      gamesPlayed: 0,
+      gamesWon: 0,
+      duelsWon: 0,
+      spellsCast: 0,
+      grimoiresCollected: 0,
+      wordsTypedInTyphoon: 0,
+      perfectQuizzes: 0,
+    },
   };
   await db.collection("users").doc(uid).set(userProfile);
   return null;
@@ -313,6 +323,183 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
 });
 
 // =================================================================
+//                    ACHIEVEMENT FUNCTIONS
+// =================================================================
+
+// Import achievements and related types
+import { ALL_ACHIEVEMENTS, Achievement, UserStats } from "./data/achievements";
+
+/**
+ * Helper function to grant a single achievement and update the game document.
+ */
+async function grantSingleAchievement(userId: string, gameId: string, achievement: Achievement) {
+    const userAchievementsRef = db.collection('users').doc(userId).collection('unlockedAchievements');
+    const gameRef = db.collection('games').doc(gameId);
+
+    try {
+        // Record the achievement for the user
+        await userAchievementsRef.doc(achievement.id).set({
+            achievementId: achievement.id,
+            unlockedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Update the game document with the last unlocked achievement details
+        await gameRef.update({
+            lastAchievementUnlocked: {
+                id: achievement.id,
+                name: achievement.name,
+                description: achievement.description,
+                iconUrl: achievement.iconUrl
+            }
+        });
+        logger.info(`Achievement ${achievement.id} unlocked for user ${userId} and notified on game ${gameId}.`);
+        return true; // Indicates an achievement was granted and notified
+    } catch (error) {
+        logger.error(`Error granting achievement ${achievement.id} to user ${userId} on game ${gameId}:`, error);
+        return false;
+    }
+}
+
+/**
+ * Core logic for checking and granting achievements.
+ * Can be called internally by other Cloud Functions.
+ */
+export async function checkAndGrantAchievementsInternal(userId: string, gameId: string | null) {
+  if (!userId) {
+    logger.error("checkAndGrantAchievementsInternal: userId is required.");
+    return;
+  }
+
+  const userRef = db.collection('users').doc(userId);
+  let userDoc;
+  try {
+    userDoc = await userRef.get();
+  } catch (error) {
+    logger.error(`Failed to retrieve user document for ${userId}:`, error);
+    return;
+  }
+
+  if (!userDoc.exists) {
+    logger.error(`User ${userId} not found for checking achievements.`);
+    return;
+  }
+
+  const userData = userDoc.data();
+  const userStats = userData?.stats as UserStats; // Type assertion
+  if (!userStats) {
+    logger.info(`User ${userId} has no stats, skipping achievement check.`);
+    // If gameId is provided, clear any stale achievement notification
+    if (gameId) {
+        const gameRef = db.collection('games').doc(gameId);
+        try {
+            await gameRef.update({ lastAchievementUnlocked: null });
+        } catch (error) {
+            logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): ${error.message}`);
+        }
+    }
+    return;
+  }
+
+  let unlockedAchievementsSnapshot;
+  try {
+    unlockedAchievementsSnapshot = await userRef.collection('unlockedAchievements').get();
+  } catch (error) {
+    logger.error(`Failed to retrieve unlocked achievements for ${userId}:`, error);
+    return;
+  }
+  const unlockedAchievementIds = new Set(unlockedAchievementsSnapshot.docs.map((doc) => doc.id));
+
+  let newAchievementGrantedInThisCall = false;
+
+  for (const achievement of ALL_ACHIEVEMENTS) {
+    if (unlockedAchievementIds.has(achievement.id)) {
+      continue; // Already unlocked
+    }
+
+    const statValue = userStats[achievement.trigger.stat];
+    if (statValue !== undefined && statValue >= achievement.trigger.value) {
+      logger.info(`User ${userId} meets criteria for achievement ${achievement.id}. Stat ${achievement.trigger.stat}: ${statValue} >= ${achievement.trigger.value}`);
+      if (gameId) {
+        const grantedSuccessfully = await grantSingleAchievement(userId, gameId, achievement);
+        if (grantedSuccessfully) {
+          newAchievementGrantedInThisCall = true;
+          // The last one processed in the loop will be set on the gameDoc.
+        }
+      } else {
+        // No gameId, so just unlock the achievement without game notification
+        const userAchievementsColRef = userRef.collection('unlockedAchievements');
+        try {
+          await userAchievementsColRef.doc(achievement.id).set({
+            achievementId: achievement.id,
+            unlockedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          logger.info(`Achievement ${achievement.id} unlocked for user ${userId} (no gameId for notification).`);
+          // newAchievementGrantedInThisCall is not set to true here, as it tracks game notification specifically.
+          // Or, if we want to track any unlock: newAchievementGrantedInThisCall = true; (decide behavior)
+          // For now, let's say newAchievementGrantedInThisCall tracks if a *game notification* was made.
+        } catch (error) {
+          logger.error(`Error granting achievement ${achievement.id} to user ${userId} (no gameId):`, error);
+        }
+      }
+      // If we only want to process & notify for the *first* new achievement per call:
+      // if (newAchievementGrantedInThisCall && gameId) break;
+    }
+  }
+
+  if (gameId && !newAchievementGrantedInThisCall) {
+    // If a gameId was provided, but no new achievement was granted *and notified* in this call,
+    // clear the lastAchievementUnlocked field to prevent stale notifications.
+    const gameRef = db.collection('games').doc(gameId);
+    try {
+      await gameRef.update({ lastAchievementUnlocked: null });
+      logger.info(`No new achievements for user ${userId} on game ${gameId}. Cleared lastAchievementUnlocked.`);
+    } catch (error) {
+      // Non-critical if game doc doesn't exist or field is already null
+      logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId}: ${error.message}`);
+    }
+  } else if (gameId && newAchievementGrantedInThisCall) {
+    logger.info(`Finished checking achievements for user ${userId}. At least one achievement was processed for game ${gameId}.`);
+  }
+}
+
+/**
+ * Callable Cloud Function wrapper for checking and granting achievements.
+ */
+export const checkAndGrantAchievements = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté pour vérifier les succès.");
+  }
+
+  const { userId, gameId } = request.data;
+
+  if (!userId || typeof userId !== 'string') {
+    throw new functions.https.HttpsError("invalid-argument", "Le champ userId (chaîne de caractères) est requis.");
+  }
+
+  // gameId is optional. If provided, it must be a string.
+  if (gameId !== undefined && (typeof gameId !== 'string' || gameId.length === 0)) {
+    throw new functions.https.HttpsError("invalid-argument", "Le champ gameId doit être une chaîne de caractères non vide si fourni.");
+  }
+
+  // Basic security: a user can only trigger this for themselves.
+  // Server-side functions calling `checkAndGrantAchievementsInternal` directly bypass this.
+  if (request.auth.uid !== userId) {
+    throw new functions.https.HttpsError("permission-denied", "Vous ne pouvez vérifier les succès que pour vous-même.");
+  }
+
+  try {
+    await checkAndGrantAchievementsInternal(userId, gameId || null);
+    return { success: true, message: "Vérification des succès terminée." };
+  } catch (error) {
+    logger.error(`Erreur lors de la vérification des succès pour ${userId} (jeu: ${gameId || "N/A"}):`, error);
+    // Don't throw raw error to client, but log it.
+    // The internal function handles its own errors by logging, but top-level catch here is good.
+    throw new functions.https.HttpsError("internal", "Une erreur est survenue lors de la vérification des succès.");
+  }
+});
+
+
+// =================================================================
 //                    GESTION DU LOBBY ET DES PARTIES
 // =================================================================
 
@@ -549,6 +736,120 @@ export const startGame = onCall(async (request: functions.https.CallableRequest)
   return { success: true };
 });
 
+// =================================================================
+//                    MINI-GAME RESULT FUNCTIONS
+// =================================================================
+
+export const submitQuizResult = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  }
+  const { gameId, playerId, wasPerfect } = request.data; // gameId might not be strictly needed for this stat if user is known.
+  const aUid = request.auth.uid; // Authenticated user
+
+  if (aUid !== playerId) {
+      logger.error(`User ${aUid} attempting to submit quiz result for ${playerId}`);
+      throw new functions.https.HttpsError("permission-denied", "You can only submit quiz results for yourself.");
+  }
+
+  if (typeof wasPerfect !== 'boolean' || typeof playerId !== 'string' || playerId.length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid data for quiz result.");
+  }
+
+  if (wasPerfect) {
+    const playerDocRef = db.collection('users').doc(playerId);
+    try {
+      await playerDocRef.update({
+        'stats.perfectQuizzes': admin.firestore.FieldValue.increment(1)
+      });
+      logger.info(`Perfect quiz stat updated for player ${playerId}. GameID: ${gameId}`);
+
+      // After successful stat update, check for achievements
+      // playerId and gameId are from request.data
+      try {
+        await checkAndGrantAchievementsInternal(playerId, gameId || null); // Pass gameId or null
+        logger.info(`Achievement check initiated for player ${playerId} in game ${gameId || "N/A"} after perfect quiz.`);
+      } catch (error) {
+        logger.error(`Error initiating achievement check for player ${playerId} in game ${gameId || "N/A"} after perfect quiz:`, error);
+      }
+      return { success: true, message: "Quiz result processed." };
+    } catch (error) {
+      logger.error(`Error updating perfectQuizzes for player ${playerId}:`, error);
+      throw new functions.https.HttpsError("internal", "Failed to update quiz stats.");
+    }
+  } else {
+    // No stat update if not perfect, but acknowledge processing.
+    return { success: true, message: "Quiz result processed (not perfect)." };
+  }
+});
+
+export const submitHangeulTyphoonResult = onCall({ cors: true }, async (request) => {
+  if (!request.auth) { // Assuming the caller (e.g., game client of one player, or a trusted server process) is authenticated
+    throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  }
+  const { gameId, winnerId, playersData } = request.data; // gameId might not be strictly needed for stats if users are known.
+
+  if (typeof winnerId !== 'string' || !Array.isArray(playersData) || playersData.length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid data for Hangeul Typhoon result.");
+  }
+
+  const batch = db.batch();
+
+  // Update duelsWon for the winner
+  if (winnerId && winnerId.length > 0) { // Check if there's a winner
+    const winnerDocRef = db.collection('users').doc(winnerId);
+    batch.update(winnerDocRef, {
+      'stats.duelsWon': admin.firestore.FieldValue.increment(1)
+    });
+  }
+
+  // Update wordsTypedInTyphoon for all participants
+  for (const playerData of playersData) {
+    if (typeof playerData.userId === 'string' && playerData.userId.length > 0 && typeof playerData.wordsTyped === 'number' && playerData.wordsTyped >= 0) {
+      const playerDocRef = db.collection('users').doc(playerData.userId);
+      // Only update if wordsTyped is greater than 0, or always record participation?
+      // Current logic increments even if 0, which is fine for FieldValue.increment.
+      batch.update(playerDocRef, {
+        'stats.wordsTypedInTyphoon': admin.firestore.FieldValue.increment(playerData.wordsTyped)
+      });
+    } else {
+        logger.warn("Invalid player data in playersData array, skipping:", playerData);
+    }
+  }
+
+  try {
+    await batch.commit();
+    logger.info(`Hangeul Typhoon stats updated. GameID: ${gameId}, Winner: ${winnerId}, Participants: ${playersData.map((p: { userId: string; }) => p.userId).join(", ")}.`);
+
+    // After successful stat update, check for achievements for all involved players
+    // gameId is from request.data.gameId
+    try {
+      const userIdsToUpdate = new Set<string>();
+      if (winnerId && winnerId.length > 0) {
+        userIdsToUpdate.add(winnerId);
+      }
+      for (const playerData of playersData) {
+        // Ensure playerData.userId is a valid string before adding
+        if (playerData.userId && typeof playerData.userId === 'string' && playerData.userId.length > 0) {
+          userIdsToUpdate.add(playerData.userId);
+        }
+      }
+
+      logger.info(`Initiating achievement check for Hangeul Typhoon users in game ${gameId || "N/A"}: ${Array.from(userIdsToUpdate).join(", ")}`);
+      for (const userIdFromSet of userIdsToUpdate) {
+        await checkAndGrantAchievementsInternal(userIdFromSet, gameId || null); // Pass gameId or null
+      }
+      logger.info(`Achievement check completed for users in game ${gameId || "N/A"} after Hangeul Typhoon.`);
+    } catch (error) {
+      logger.error(`Error initiating achievement checks for Hangeul Typhoon users in game ${gameId || "N/A"}:`, error);
+    }
+    return { success: true, message: "Hangeul Typhoon result processed." };
+  } catch (error) {
+    logger.error("Error committing Hangeul Typhoon stats batch:", error);
+    throw new functions.https.HttpsError("internal", "Failed to update Hangeul Typhoon stats.");
+  }
+});
+
 // --- FONCTIONS DE TOUR DE JEU ---
 
 export const rollDice = onCall(async (request: functions.https.CallableRequest) => {
@@ -652,6 +953,40 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
       // ***** END OF XP MODIFICATION AREA *****
 
       await gameRef.update({ players, grimoirePositions, status: "finished", winnerId: currentPlayer.uid, turnState: "ENDED", lastEventCard: null });
+      // Atomically update stats for all players
+      const batch = db.batch();
+      players.forEach((player: Player) => {
+        const playerRef = db.collection("users").doc(player.uid);
+        batch.update(playerRef, {
+          "stats.gamesPlayed": admin.firestore.FieldValue.increment(1),
+          "stats.grimoiresCollected": admin.firestore.FieldValue.increment(player.grimoires || 0),
+        });
+
+        if (player.uid === winnerId) {
+          batch.update(playerRef, {
+            "stats.gamesWon": admin.firestore.FieldValue.increment(1),
+          });
+        }
+      });
+      await batch.commit().catch((error) => {
+        logger.error("Erreur lors de la mise à jour des statistiques des joueurs:", error);
+        // Optionally, handle the error more gracefully, e.g., by retrying or logging for manual correction.
+        // For now, we just log the error. The game is already marked as finished.
+      });
+
+      // After successful stats update, check for achievements for all players in the game
+      try {
+        logger.info(`Initiating achievement check for game ${gameId} completion.`);
+        // The 'players' variable here holds the final state of players in the game
+        // gameId is available directly in this function's scope.
+        for (const player of players) { // 'players' is the array of player objects used in the gameRef.update above
+          await checkAndGrantAchievementsInternal(player.uid, gameId);
+        }
+        logger.info(`Achievement check completed for all players in game ${gameId}.`);
+      } catch (error) {
+        logger.error(`Error during achievement checks for game ${gameId} completion:`, error);
+      }
+
       return { success: true, effect: "VICTORY" };
     }
   }
@@ -927,6 +1262,24 @@ export const castSpell = onCall(async (request: functions.https.CallableRequest)
 
   players[casterIndex].mana -= spell.manaCost;
 
+  // Increment spellsCast stat for the caster
+  const casterStatsRef = db.collection('users').doc(uid);
+  await casterStatsRef.update({
+    'stats.spellsCast': admin.firestore.FieldValue.increment(1)
+  }).catch((error) => {
+    logger.error(`Erreur lors de la mise à jour de stats.spellsCast pour ${uid}:`, error);
+    // Continue even if stat update fails, core game logic is more critical.
+  });
+
+  // After successful spell cast and stat update, check for achievements
+  // uid is casterId, gameId is from request.data.gameId
+  try {
+    await checkAndGrantAchievementsInternal(uid, gameId);
+    logger.info(`Achievement check initiated for caster ${uid} in game ${gameId} after spell cast.`);
+  } catch (error) {
+    logger.error(`Error initiating achievement check for caster ${uid} in game ${gameId} after spell cast:`, error);
+  }
+
   switch (spell.id) {
     case "BLESSING_OF_HANGEUL":
       if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
@@ -947,6 +1300,7 @@ export const castSpell = onCall(async (request: functions.https.CallableRequest)
         board: boardCopy,
         lastSpellCast: { spellId, casterId: uid, options },
       });
+      // Note: spellsCast was already incremented before the switch.
       return { success: true }; // Return early as board update is specific
     case "MANA_SHIELD":
       // Target is self, casterIndex is used.
