@@ -4,6 +4,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https"; // onCall et H
 import * as admin from "firebase-admin";
 import { FieldValue, DocumentReference } from "firebase-admin/firestore";
 import * as functions from "firebase-functions";
+import * as logger from "firebase-functions/logger";
 import { Player, Tile, Guild, GuildMember } from "./types";
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 
@@ -61,9 +62,9 @@ interface TileConfig {
 type TileEffectHandler = (
   t: admin.firestore.Transaction,
   gameRef: DocumentReference,
-  gameData: any,
+  gameData: admin.firestore.DocumentData | undefined,
   playerId: string,
-  tileData?: { [key: string]: any }
+  tileData?: { [key: string]: unknown }
 ) => Promise<void>;
 
 
@@ -93,7 +94,7 @@ function completeQuestStep(quest: Quest, stepIndex: number): Quest {
  * @param gameData Les données de la partie.
  * @param t La transaction Firestore en cours.
  */
-async function advanceToNextPlayer(gameRef: DocumentReference, gameData: any, t: admin.firestore.Transaction) {
+async function advanceToNextPlayer(gameRef: DocumentReference, gameData: admin.firestore.DocumentData | undefined, t: admin.firestore.Transaction) {
   const currentPlayerIndex = gameData.turnOrder.indexOf(gameData.currentPlayerId);
   const nextPlayerIndex = (currentPlayerIndex + 1) % gameData.turnOrder.length;
   const nextPlayerId = gameData.turnOrder[nextPlayerIndex];
@@ -104,7 +105,7 @@ async function advanceToNextPlayer(gameRef: DocumentReference, gameData: any, t:
 //                    GESTION DES UTILISATEURS ET PROFILS
 // =================================================================
 
-export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (user) => {
+export const createProfileOnSignup = functions.auth.user().onCreate(async (user: admin.auth.UserRecord) => {
   const { uid, email } = user;
   if (!email) {
     logger.info(`Utilisateur anonyme ${uid} créé, pas de profil nécessaire.`);
@@ -125,11 +126,11 @@ export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (use
 });
 
 export const updateUserProfile = onCall({ cors: true }, async (request) => {
-  if (!request.auth) throw new functionsV1.https.HttpsError("unauthenticated", "Vous devez être connecté.");
+  if (!request.auth) throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
   const { pseudo } = request.data;
   const { uid } = request.auth;
   if (typeof pseudo !== "string" || pseudo.length < 3 || pseudo.length > 20) {
-    throw new functionsV1.https.HttpsError("invalid-argument", "Le pseudo doit contenir entre 3 et 20 caractères.");
+    throw new functions.https.HttpsError("invalid-argument", "Le pseudo doit contenir entre 3 et 20 caractères.");
   }
   await admin.firestore().collection("users").doc(uid).update({ pseudo });
   return { status: "succès" };
@@ -139,7 +140,7 @@ export const updateUserProfile = onCall({ cors: true }, async (request) => {
 //                    GESTION DES GUILDES (MAISONS DE SORCIERS)
 // =================================================================
 
-export const createGuild = onCall({ cors: true }, async (request) => {
+export const createGuild = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   // 1. Authenticate the user
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Vous devez être connecté pour créer une guilde.");
@@ -212,7 +213,7 @@ export const createGuild = onCall({ cors: true }, async (request) => {
   }
 });
 
-export const joinGuild = onCall({ cors: true }, async (request) => {
+export const joinGuild = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   // 1. Authenticate the user
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Vous devez être connecté pour rejoindre une guilde.");
@@ -278,7 +279,7 @@ export const joinGuild = onCall({ cors: true }, async (request) => {
   }
 });
 
-export const leaveGuild = onCall({ cors: true }, async (request) => {
+export const leaveGuild = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   // 1. Authenticate the user
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Vous devez être connecté pour quitter une guilde.");
@@ -369,7 +370,7 @@ export const leaveGuild = onCall({ cors: true }, async (request) => {
  * Crée une nouvelle partie dans Firestore en utilisant la syntaxe v2 des Cloud Functions.
  * L'utilisateur qui appelle cette fonction devient l'hôte.
  */
-export const createGame = onCall(async (request) => { // MODIFIÉ ICI
+export const createGame = onCall(async (request: functions.https.CallableRequest) => { // MODIFIÉ ICI
   // 1. Validation de l'authentification
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Vous devez être connecté.");
@@ -436,7 +437,7 @@ export const createGame = onCall(async (request) => { // MODIFIÉ ICI
  * joinGame
  * * Permet à un utilisateur de rejoindre une partie existante.
  */
-export const joinGame = onCall(async (request) => {
+export const joinGame = onCall(async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Vous devez être connecté.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID de jeu invalide.");
@@ -515,7 +516,7 @@ export const joinGame = onCall(async (request) => {
  * * Permet à un utilisateur de quitter une partie.
  * * Si l'hôte quitte, la partie est supprimée.
  */
-export const leaveGame = onCall(async (request) => {
+export const leaveGame = onCall(async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -543,17 +544,24 @@ export const leaveGame = onCall(async (request) => {
       return { success: true, message: "Partie dissoute par l'hôte." };
     }
 
-  const playerToRemove = gameData.players.find((p: Player) => p.uid === uid);
+  const playerToRemove = gameData?.players.find((p: Player) => p.uid === uid);
   if (playerToRemove) {
     await gameRef.update({ players: FieldValue.arrayRemove(playerToRemove) });
     return { success: true, message: "Vous avez quitté la partie." };
   }
   return { success: true };
+  } catch (error) {
+    logger.error("Error leaving game:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "An internal error occurred while leaving the game.");
+  }
 });
 
 // --- FONCTIONS DE FLUX DE JEU ---
 
-export const startGame = onCall(async (request) => {
+export const startGame = onCall(async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -592,7 +600,7 @@ export const startGame = onCall(async (request) => {
 
 // --- FONCTIONS DE TOUR DE JEU ---
 
-export const rollDice = onCall(async (request) => {
+export const rollDice = onCall(async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -622,7 +630,7 @@ export const rollDice = onCall(async (request) => {
   return { success: true, diceResult };
 });
 
-export const resolveTileAction = onCall(async (request) => {
+export const resolveTileAction = onCall(async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -669,7 +677,7 @@ export const resolveTileAction = onCall(async (request) => {
   return { success: true };
 });
 
-export const castSpell = onCall(async (request) => {
+export const castSpell = onCall(async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId, spellId, targetId } = request.data;
   if (typeof gameId !== "string" || typeof spellId !== "string" || typeof targetId !== "string") {
