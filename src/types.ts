@@ -88,4 +88,14 @@ export interface UserProfile {
   fragments: { vocab: number; grammar: number; culture: number };
   createdAt: FirebaseFirestore.Timestamp;
   guildId?: string; // Optional: ID of the guild the user belongs to
+  // Add the new stats object below
+  stats: {
+    gamesPlayed: number;
+    gamesWon: number;
+    duelsWon: number; // Nombre de duels "Hangeul Typhoon" gagnés
+    spellsCast: number; // Nombre total de sorts lancés
+    grimoiresCollected: number; // Nombre total de grimoires collectés à travers toutes les parties
+    wordsTypedInTyphoon: number; // Nombre total de mots corrects tapés dans "Hangeul Typhoon"
+    perfectQuizzes: number; // Nombre de mini-jeux de quiz réussis sans erreur
+  };
 }
