@@ -508,7 +508,7 @@ export const checkAndGrantAchievements = onCall({ cors: true }, async (request) 
  * Crée une nouvelle partie dans Firestore en utilisant la syntaxe v2 des Cloud Functions.
  * L'utilisateur qui appelle cette fonction devient l'hôte.
  */
-export const createGame = onCall(async (request: functions.https.CallableRequest) => { // MODIFIÉ ICI
+export const createGame = onCall({ cors: true }, async (request: functions.https.CallableRequest) => { // MODIFIÉ ICI
   // 1. Validation de l'authentification
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Vous devez être connecté.");
@@ -575,7 +575,7 @@ export const createGame = onCall(async (request: functions.https.CallableRequest
  * joinGame
  * * Permet à un utilisateur de rejoindre une partie existante.
  */
-export const joinGame = onCall(async (request: functions.https.CallableRequest) => {
+export const joinGame = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Vous devez être connecté.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID de jeu invalide.");
@@ -654,7 +654,7 @@ export const joinGame = onCall(async (request: functions.https.CallableRequest) 
  * * Permet à un utilisateur de quitter une partie.
  * * Si l'hôte quitte, la partie est supprimée.
  */
-export const leaveGame = onCall(async (request: functions.https.CallableRequest) => {
+export const leaveGame = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -699,7 +699,7 @@ export const leaveGame = onCall(async (request: functions.https.CallableRequest)
 
 // --- FONCTIONS DE FLUX DE JEU ---
 
-export const startGame = onCall(async (request: functions.https.CallableRequest) => {
+export const startGame = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -852,7 +852,7 @@ export const submitHangeulTyphoonResult = onCall({ cors: true }, async (request)
 
 // --- FONCTIONS DE TOUR DE JEU ---
 
-export const rollDice = onCall(async (request: functions.https.CallableRequest) => {
+export const rollDice = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -882,7 +882,7 @@ export const rollDice = onCall(async (request: functions.https.CallableRequest) 
   return { success: true, diceResult };
 });
 
-export const resolveTileAction = onCall(async (request: functions.https.CallableRequest) => {
+export const resolveTileAction = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId } = request.data;
   if (typeof gameId !== "string") throw new HttpsError("invalid-argument", "ID invalide.");
@@ -1214,7 +1214,7 @@ export const resolveTileAction = onCall(async (request: functions.https.Callable
   return { success: true };
 });
 
-export const castSpell = onCall(async (request: functions.https.CallableRequest) => {
+export const castSpell = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");
   const { gameId, spellId, targetId, options } = request.data; // Added options
   if (typeof gameId !== "string" || typeof spellId !== "string") { // targetId validation depends on spell
