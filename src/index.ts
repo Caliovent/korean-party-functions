@@ -8,13 +8,17 @@ import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour 
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
 import { getXpForLevel } from "./xpUtils";
-import { Player, Tile, Guild, GuildMember } from "./types";
+import { Player, Tile, Guild, GuildMember, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game } from "./types"; // Added Game
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards, EventCard } from "./data/eventCards";
 
 // Mana Reward Constants
 const MANA_REWARD_MINI_GAME_QUIZ = 20;
 // const MANA_REWARD_HANGEUL_TYPHOON = 40; // Placeholder for future use
+
+// Hangeul Typhoon Constants
+const DEFAULT_GROUND_RISE_AMOUNT = 10;
+const DEFAULT_PENALTY_RISE_AMOUNT = 5;
 
 // Helper pour générer un plateau de jeu par défaut
 const generateBoardLayout = (): Tile[] => {
@@ -1213,6 +1217,200 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
   });
   return { success: true };
 });
+
+// =================================================================
+//                    HANGEUL TYPHOON FUNCTIONS
+// =================================================================
+
+export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }, async (request): Promise<SendTyphoonAttackResponse> => {
+  logger.info("sendTyphoonAttack request received:", request.data);
+
+  // Top-level variables for catch block logging, if needed before they are assigned in try.
+  let gameIdForCatch: string | undefined = request.data.gameId; // Attempt to get it early
+  let attackerPlayerIdForCatch: string | undefined = request.data.attackerPlayerId;
+
+  try {
+    // 1. Authentication Check & UID Extraction
+    if (!request.auth) {
+      logger.error("Unauthenticated call to sendTyphoonAttack");
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+    const uid = request.auth.uid;
+    logger.info(`User ${uid} authenticated.`);
+
+    // 2. Extract Request Data
+    const { gameId, attackerPlayerId, targetPlayerId, attackWord } = request.data;
+    // Update context for catch block
+    gameIdForCatch = gameId;
+    attackerPlayerIdForCatch = attackerPlayerId;
+
+
+    // 3. Attacker ID Verification
+    if (attackerPlayerId !== uid) {
+      logger.error(`Attacker ID ${attackerPlayerId} does not match authenticated user ${uid}.`);
+      throw new HttpsError("permission-denied", `Attacker ID ${attackerPlayerId} does not match authenticated user.`);
+    }
+    logger.info(`Attacker ID ${attackerPlayerId} verified against authenticated user ${uid}.`);
+
+    // 4. Input Validation (Basic)
+    if (!gameId || typeof gameId !== "string" || gameId.trim() === "") {
+      throw new HttpsError("invalid-argument", "Missing or invalid gameId.");
+    }
+    if (!attackerPlayerId || typeof attackerPlayerId !== "string" || attackerPlayerId.trim() === "") {
+      throw new HttpsError("invalid-argument", "Missing or invalid attackerPlayerId.");
+    }
+    if (!targetPlayerId || typeof targetPlayerId !== "string" || targetPlayerId.trim() === "") {
+      throw new HttpsError("invalid-argument", "Missing or invalid targetPlayerId.");
+    }
+    if (!attackWord || typeof attackWord !== "string" || attackWord.trim() === "") {
+      throw new HttpsError("invalid-argument", "Missing or invalid attackWord.");
+    }
+    logger.info("Request parameters validated.");
+
+    // 5. Fetch Game Document
+    const gameRef = db.collection("games").doc(gameId);
+    let gameDoc;
+    // Specific try-catch for Firestore fetch, could be part of the main try-catch too.
+    try {
+      gameDoc = await gameRef.get();
+    } catch (error) {
+      logger.error(`Error fetching game document ${gameId}:`, error);
+      throw new HttpsError("internal", `Failed to fetch game data for gameId ${gameId}. Details: ${error.message}`);
+    }
+
+    // 6. Game Existence and Status Check
+    if (!gameDoc.exists) {
+      logger.error(`Game with ID ${gameId} not found.`);
+      throw new HttpsError("not-found", `Game with ID ${gameId} not found.`);
+    }
+    const gameData = gameDoc.data() as Game; // Type assertion using Game type
+    logger.info(`Game ${gameId} found.`);
+
+    if (gameData.status !== "playing") {
+      logger.warn(`Game ${gameId} is not active. Current status: ${gameData.status}`);
+      throw new HttpsError("failed-precondition", `Game ${gameId} is not active. Current status: ${gameData.status}`);
+    }
+    logger.info(`Game ${gameId} is active (status: ${gameData.status}).`);
+
+    // 7. Player Participation Verification & Game State Retrieval
+    const attackerPlayer = gameData.players.find(p => p.uid === attackerPlayerId);
+    const targetPlayer = gameData.players.find(p => p.uid === targetPlayerId);
+
+    if (!attackerPlayer) {
+      logger.error(`Attacker player ${attackerPlayerId} object not found in game ${gameId} despite prior checks.`);
+      throw new HttpsError("internal", `Attacker ${attackerPlayerId} data is inconsistent within game ${gameId}.`);
+    }
+    if (!targetPlayer) {
+      logger.error(`Target player ${targetPlayerId} object not found in game ${gameId} despite prior checks.`);
+      throw new HttpsError("internal", `Target ${targetPlayerId} data is inconsistent within game ${gameId}.`);
+    }
+    if (targetPlayer.blocks === undefined || targetPlayer.blocks === null) {
+      logger.error(`Target player ${targetPlayerId} blocks array is undefined or null. Game data: `, gameData);
+      throw new HttpsError("internal", `Target player ${targetPlayerId} blocks data is missing or inconsistent.`);
+    }
+    logger.info(`Attacker ${attackerPlayerId} data: groundHeight ${attackerPlayer.groundHeight}`);
+    logger.info(`Target ${targetPlayerId} data: ${targetPlayer.blocks.length} blocks, groundHeight ${targetPlayer.groundHeight}`);
+
+    if (attackerPlayerId === targetPlayerId) {
+      logger.error("Attacker and target cannot be the same player.");
+      throw new HttpsError("invalid-argument", "Attacker and target cannot be the same player.");
+    }
+    logger.info(`Attacker ${attackerPlayerId} and Target ${targetPlayerId} game states retrieved and verified in game ${gameId}.`);
+
+    const currentTime = admin.firestore.Timestamp.now();
+    let targetBlock: Player["blocks"][0] | undefined = undefined;
+    let blockIndex = -1;
+
+    for (let i = 0; i < targetPlayer.blocks.length; i++) {
+      const block = targetPlayer.blocks[i];
+      if (block.text === attackWord && !block.isDestroyed) {
+        targetBlock = block;
+        blockIndex = i;
+        break;
+      }
+    }
+
+    let isAttackSuccessful = false;
+    let failureReason = "";
+
+    if (!targetBlock) {
+      logger.info(`Attack validation: No active block found for word "${attackWord}" for target ${targetPlayerId}.`);
+      failureReason = "WORD_NOT_FOUND_OR_DESTROYED";
+      isAttackSuccessful = false;
+    } else {
+      if (targetBlock.vulnerableAt.toMillis() <= currentTime.toMillis()) {
+        logger.info(`Attack validation: Block "${targetBlock.text}" for target ${targetPlayerId} is vulnerable.`);
+        isAttackSuccessful = true;
+      } else {
+        logger.info(`Attack validation: Block "${targetBlock.text}" for target ${targetPlayerId} is not vulnerable. Vulnerable at: ${targetBlock.vulnerableAt.toDate().toISOString()}, Current time: ${currentTime.toDate().toISOString()}`);
+        failureReason = "BLOCK_NOT_VULNERABLE";
+        isAttackSuccessful = false;
+      }
+    }
+
+    if (isAttackSuccessful) {
+      if (!targetBlock || blockIndex === -1) {
+        logger.error("Critical error: targetBlock or blockIndex is invalid in successful attack path.", { targetBlock, blockIndex });
+        throw new HttpsError("internal", "Inconsistent state during successful attack processing.");
+      }
+      logger.info(`Processing successful attack on block: ${targetBlock.id} - ${targetBlock.text} for target ${targetPlayer.uid}`);
+      const updatedTargetBlocks = JSON.parse(JSON.stringify(targetPlayer.blocks));
+      updatedTargetBlocks[blockIndex].isDestroyed = true;
+      const destroyedBlockWord = targetBlock.text;
+      const targetGroundRiseAmount = DEFAULT_GROUND_RISE_AMOUNT;
+      const newTargetGroundHeight = (targetPlayer.groundHeight || 0) + targetGroundRiseAmount;
+      const updatedPlayers = gameData.players.map(p => {
+        if (p.uid === targetPlayer.uid) {
+          return { ...p, blocks: updatedTargetBlocks, groundHeight: newTargetGroundHeight };
+        }
+        return p;
+      });
+      await gameRef.update({ players: updatedPlayers });
+      logger.info(`Firestore updated successfully for successful attack. Target: ${targetPlayer.uid}, Block: ${targetBlock.id}`);
+      return {
+        status: "success",
+        message: "Attack successful. Target's block destroyed.",
+        attackerPlayerId: attackerPlayerId,
+        targetPlayerId: targetPlayer.uid,
+        destroyedBlockWord: destroyedBlockWord,
+        targetGroundRiseAmount: targetGroundRiseAmount,
+      } as SendTyphoonAttackSuccessResponse;
+    } else {
+      if (!attackerPlayer) {
+        logger.error("Critical error: attackerPlayer is invalid in failed attack path.", { attackerPlayerId });
+        throw new HttpsError("internal", "Inconsistent state during failed attack processing: attacker data missing.");
+      }
+      const attackerPenaltyGroundRiseAmount = DEFAULT_PENALTY_RISE_AMOUNT;
+      const newAttackerGroundHeight = (attackerPlayer.groundHeight || 0) + attackerPenaltyGroundRiseAmount;
+      logger.info(`Processing failed attack for attacker: ${attackerPlayer.uid}. Reason: ${failureReason}. Applying penalty of ${attackerPenaltyGroundRiseAmount}. New ground height: ${newAttackerGroundHeight}`);
+      const updatedPlayers = gameData.players.map(p => {
+        if (p.uid === attackerPlayer.uid) {
+          return { ...p, groundHeight: newAttackerGroundHeight };
+        }
+        return p;
+      });
+      await gameRef.update({ players: updatedPlayers });
+      logger.info(`Firestore updated successfully for failed attack. Attacker: ${attackerPlayer.uid} penalized.`);
+      return {
+        status: "failure",
+        reason: failureReason || "UNKNOWN_FAILURE",
+        message: "Attack failed. Attacker penalized.",
+        attackerPlayerId: attackerPlayerId,
+        attackerPenaltyGroundRiseAmount: attackerPenaltyGroundRiseAmount,
+      } as SendTyphoonAttackFailureResponse;
+    }
+  } catch (error) {
+    // Log with context if available
+    logger.error(`Unhandled error in sendTyphoonAttack for game: ${gameIdForCatch || "unknown"}, attacker: ${attackerPlayerIdForCatch || "unknown"}, error:`, error);
+    if (error instanceof HttpsError) {
+      throw error; // Re-throw HttpsErrors directly
+    }
+    // For other errors, throw a generic HttpsError
+    const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+    throw new HttpsError("internal", "An unexpected internal error occurred processing your attack.", { details: errorMessage });
+  }
+});
+
 
 export const castSpell = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");

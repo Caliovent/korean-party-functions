@@ -4,8 +4,18 @@
  * pour l'ensemble des Cloud Functions du projet Korean Party.
  */
 import { SpellId } from "./spells";
+import { FirebaseFirestore } from "firebase-admin/firestore";
 
 // Représente l'état d'un joueur dans une partie
+
+// Hangeul Typhoon Game Mechanics
+export interface TyphoonBlock {
+  id: string;
+  text: string;
+  vulnerableAt: FirebaseFirestore.Timestamp;
+  isDestroyed: boolean;
+}
+
 export interface Player {
   uid: string;
   displayName: string;
@@ -19,6 +29,8 @@ export interface Player {
     [key: string]: any; // Optional: for future flexibility
   }>;
   skipNextTurn?: boolean; // Will be conceptually replaced by effects array
+  groundHeight: number; // Hangeul Typhoon
+  blocks: TyphoonBlock[]; // Hangeul Typhoon
 }
 
 // Définition d'une case de jeu
@@ -99,3 +111,34 @@ export interface UserProfile {
     perfectQuizzes: number; // Nombre de mini-jeux de quiz réussis sans erreur
   };
 }
+
+// Request Payload Interface for Hangeul Typhoon Attack
+export interface SendTyphoonAttackRequest {
+  gameId: string;
+  attackerPlayerId: string;
+  targetPlayerId: string;
+  attackWord: string;
+}
+
+// Response Payload Interfaces for Hangeul Typhoon Attack
+export interface SendTyphoonAttackResponseBase {
+  status: "success" | "failure";
+  attackerPlayerId: string;
+}
+
+export interface SendTyphoonAttackSuccessResponse extends SendTyphoonAttackResponseBase {
+  status: "success";
+  message: string;
+  targetPlayerId: string;
+  destroyedBlockWord: string;
+  targetGroundRiseAmount: number;
+}
+
+export interface SendTyphoonAttackFailureResponse extends SendTyphoonAttackResponseBase {
+  status: "failure";
+  reason: string;
+  message: string;
+  attackerPenaltyGroundRiseAmount: number;
+}
+
+export type SendTyphoonAttackResponse = SendTyphoonAttackSuccessResponse | SendTyphoonAttackFailureResponse;
