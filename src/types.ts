@@ -4,7 +4,7 @@
  * pour l'ensemble des Cloud Functions du projet Korean Party.
  */
 import { SpellId } from "./spells";
-import { FirebaseFirestore } from "firebase-admin/firestore";
+import * as admin from "firebase-admin";
 
 // Représente l'état d'un joueur dans une partie
 
@@ -12,7 +12,7 @@ import { FirebaseFirestore } from "firebase-admin/firestore";
 export interface TyphoonBlock {
   id: string;
   text: string;
-  vulnerableAt: FirebaseFirestore.Timestamp;
+  vulnerableAt: admin.firestore.Timestamp;
   isDestroyed: boolean;
 }
 
@@ -67,7 +67,7 @@ export interface Game {
     description: string;
     // id?: string; // if needed to reference back to eventCards data
   };
-  createdAt: FirebaseFirestore.Timestamp;
+  createdAt: admin.firestore.Timestamp;
 }
 
 // Represents a member of a Guild
@@ -83,7 +83,7 @@ export interface Guild {
   tag: string; // Guild tag, unique, short (e.g., 3-5 chars)
   leaderId: string; // UID of the player who is the leader
   members: GuildMember[]; // Array of guild members
-  createdAt: FirebaseFirestore.Timestamp; // Server timestamp of creation
+  createdAt: admin.firestore.Timestamp; // Server timestamp of creation
 }
 
 // It seems UserProfile is implicitly defined in src/index.ts's createProfileOnSignup.
@@ -98,7 +98,7 @@ export interface UserProfile {
   manaCurrent: number;
   manaMax: number;
   fragments: { vocab: number; grammar: number; culture: number };
-  createdAt: FirebaseFirestore.Timestamp;
+  createdAt: admin.firestore.Timestamp;
   guildId?: string; // Optional: ID of the guild the user belongs to
   // Add the new stats object below
   stats: {

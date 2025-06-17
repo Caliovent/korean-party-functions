@@ -8,7 +8,7 @@ import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour 
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
 import { getXpForLevel } from "./xpUtils";
-import { Player, Tile, Guild, GuildMember, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game } from "./types"; // Added Game
+import { Player, Tile, Guild, GuildMember, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse } from "./types"; // Added Game
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards, EventCard } from "./data/eventCards";
 
@@ -403,7 +403,12 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
       try {
         await gameRef.update({ lastAchievementUnlocked: null });
       } catch (error) {
-        logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): ${error.message}`);
+        if (error instanceof Error) {
+          logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): ${error.message}`);
+        } else {
+          logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): An unknown error occurred`);
+        }
+
       }
     }
     return;
@@ -464,7 +469,11 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
       logger.info(`No new achievements for user ${userId} on game ${gameId}. Cleared lastAchievementUnlocked.`);
     } catch (error) {
       // Non-critical if game doc doesn't exist or field is already null
-      logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId}: ${error.message}`);
+      if (error instanceof Error) {
+        logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId}: ${error.message}`);
+      } else {
+        logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId}: An unknown error occurred`);
+      }
     }
   } else if (gameId && newAchievementGrantedInThisCall) {
     logger.info(`Finished checking achievements for user ${userId}. At least one achievement was processed for game ${gameId}.`);
@@ -548,6 +557,8 @@ export const createGame = onCall({ cors: true }, async (request: functions.https
       position: 0,
       mana: 20,
       grimoires: 0, // CORRECTION : Initialisation du champ manquant
+      groundHeight: 0, // Added
+      blocks: [], // Added
     };
 
     // 5. Création du nouvel objet Game
@@ -631,6 +642,8 @@ export const joinGame = onCall({ cors: true }, async (request: functions.https.C
       position: 0,
       mana: 20,
       grimoires: 0, // Initialiser les grimoires à 0
+      groundHeight: 0, // Added
+      blocks: [], // Added
     };
 
     // 5. Ajout atomique du joueur à la partie
@@ -961,8 +974,12 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
       await Promise.all(userUpdates);
       // ***** END OF XP MODIFICATION AREA *****
 
-      await gameRef.update({ players, grimoirePositions, status: "finished", winnerId: currentPlayer.uid, turnState: "ENDED", lastEventCard: null });
-      // Atomically update stats for all players
+      // The winnerId for game update is currentPlayer.uid
+      const gameWinnerId = currentPlayer.uid;
+
+      await gameRef.update({ players, grimoirePositions, status: "finished", winnerId: gameWinnerId, turnState: "ENDED", lastEventCard: null });
+
+      // Atomically update stats for all players - MOVED HERE
       const batch = db.batch();
       players.forEach((player: Player) => {
         const playerRef = db.collection("users").doc(player.uid);
@@ -971,7 +988,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
           "stats.grimoiresCollected": admin.firestore.FieldValue.increment(player.grimoires || 0),
         });
 
-        if (player.uid === winnerId) {
+        if (player.uid === gameWinnerId) { // Corrected to use gameWinnerId
           batch.update(playerRef, {
             "stats.gamesWon": admin.firestore.FieldValue.increment(1),
           });
@@ -979,8 +996,6 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
       });
       await batch.commit().catch((error) => {
         logger.error("Erreur lors de la mise à jour des statistiques des joueurs:", error);
-        // Optionally, handle the error more gracefully, e.g., by retrying or logging for manual correction.
-        // For now, we just log the error. The game is already marked as finished.
       });
 
       // After successful stats update, check for achievements for all players in the game
@@ -1280,7 +1295,11 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
       gameDoc = await gameRef.get();
     } catch (error) {
       logger.error(`Error fetching game document ${gameId}:`, error);
-      throw new HttpsError("internal", `Failed to fetch game data for gameId ${gameId}. Details: ${error.message}`);
+      if (error instanceof Error) {
+        throw new HttpsError("internal", `Failed to fetch game data for gameId ${gameId}. Details: ${error.message}`);
+      } else {
+        throw new HttpsError("internal", `Failed to fetch game data for gameId ${gameId}. An unknown error occurred.`);
+      }
     }
 
     // 6. Game Existence and Status Check
@@ -1456,6 +1475,7 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   if (spell.id === "MANA_SHIELD" && uid !== targetId) {
     throw new HttpsError("invalid-argument", "MANA_SHIELD must target self.");
   }
+
 
 
   const players = [...gameData.players];
