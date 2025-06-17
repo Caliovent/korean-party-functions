@@ -25,105 +25,105 @@ export interface Achievement {
 
 export const ALL_ACHIEVEMENTS: Achievement[] = [
   {
-    id: 'FIRST_GAME_PLAYED',
+    id: "FIRST_GAME_PLAYED",
     name: "Baptême du Feu",
     description: "Jouer votre première partie.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/default_icon.png", // Placeholder
     trigger: {
-      stat: 'gamesPlayed',
+      stat: "gamesPlayed",
       value: 1,
     },
   },
   {
-    id: 'FIRST_WIN',
+    id: "FIRST_WIN",
     name: "Première Victoire",
     description: "Gagner votre première partie.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/first_win.png", // Placeholder
     trigger: {
-      stat: 'gamesWon',
+      stat: "gamesWon",
       value: 1,
     },
   },
   {
-    id: 'SPELL_NOVICE',
+    id: "SPELL_NOVICE",
     name: "Apprenti Sorcier",
     description: "Lancer 10 sorts.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/spell_novice.png", // Placeholder
     trigger: {
-      stat: 'spellsCast',
+      stat: "spellsCast",
       value: 10,
     },
   },
   {
-    id: 'SPELL_ADEPT',
+    id: "SPELL_ADEPT",
     name: "Sorcier Adepte",
     description: "Lancer 50 sorts.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/spell_adept.png", // Placeholder
     trigger: {
-      stat: 'spellsCast',
+      stat: "spellsCast",
       value: 50,
     },
   },
   {
-    id: 'TYPHOON_PARTICIPANT',
+    id: "TYPHOON_PARTICIPANT",
     name: "Plume Agile",
     description: "Taper 100 mots dans Hangeul Typhoon.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/typhoon_participant.png", // Placeholder
     trigger: {
-      stat: 'wordsTypedInTyphoon',
+      stat: "wordsTypedInTyphoon",
       value: 100,
     },
   },
   {
-    id: 'TYPHOON_PRODIGY_1',
+    id: "TYPHOON_PRODIGY_1",
     name: "Prodige du Typhoon",
     description: "Gagner 1 duel Hangeul Typhoon.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/typhoon_prodigy_1.png", // Placeholder
     trigger: {
-      stat: 'duelsWon',
+      stat: "duelsWon",
       value: 1,
     },
   },
   {
-    id: 'QUIZ_MASTER_1',
+    id: "QUIZ_MASTER_1",
     name: "Cerveau Vif",
     description: "Réussir 1 quiz parfaitement.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/quiz_master_1.png", // Placeholder
     trigger: {
-      stat: 'perfectQuizzes',
+      stat: "perfectQuizzes",
       value: 1,
     },
   },
   {
-    id: 'GRIMOIRE_COLLECTOR_1',
+    id: "GRIMOIRE_COLLECTOR_1",
     name: "Collectionneur de Grimoires (Niveau 1)",
     description: "Collecter 5 grimoires au total.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/grimoire_collector_1.png", // Placeholder
     trigger: {
-      stat: 'grimoiresCollected',
+      stat: "grimoiresCollected",
       value: 5,
     },
   },
   {
-    id: 'FIVE_GAMES_WON',
+    id: "FIVE_GAMES_WON",
     name: "Vétéran Émérite",
     description: "Gagner 5 parties.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/default_icon.png", // Placeholder
     trigger: {
-      stat: 'gamesWon',
+      stat: "gamesWon",
       value: 5,
     },
   },
   {
-    id: 'FIFTY_GAMES_PLAYED',
+    id: "FIFTY_GAMES_PLAYED",
     name: "Habitué des Arènes",
     description: "Jouer 50 parties.",
     iconUrl: "gs://korean-party-dev.appspot.com/icons/achievements/default_icon.png", // Placeholder
     trigger: {
-      stat: 'gamesPlayed',
+      stat: "gamesPlayed",
       value: 50,
     },
-  }
+  },
 ];
 
 // Ensure UserStats matches the structure of the `stats` object in `UserProfile` from `src/types.ts`.

@@ -337,31 +337,31 @@ import { ALL_ACHIEVEMENTS, Achievement, UserStats } from "./data/achievements";
  * Helper function to grant a single achievement and update the game document.
  */
 async function grantSingleAchievement(userId: string, gameId: string, achievement: Achievement) {
-    const userAchievementsRef = db.collection('users').doc(userId).collection('unlockedAchievements');
-    const gameRef = db.collection('games').doc(gameId);
+  const userAchievementsRef = db.collection("users").doc(userId).collection("unlockedAchievements");
+  const gameRef = db.collection("games").doc(gameId);
 
-    try {
-        // Record the achievement for the user
-        await userAchievementsRef.doc(achievement.id).set({
-            achievementId: achievement.id,
-            unlockedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
+  try {
+    // Record the achievement for the user
+    await userAchievementsRef.doc(achievement.id).set({
+      achievementId: achievement.id,
+      unlockedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-        // Update the game document with the last unlocked achievement details
-        await gameRef.update({
-            lastAchievementUnlocked: {
-                id: achievement.id,
-                name: achievement.name,
-                description: achievement.description,
-                iconUrl: achievement.iconUrl
-            }
-        });
-        logger.info(`Achievement ${achievement.id} unlocked for user ${userId} and notified on game ${gameId}.`);
-        return true; // Indicates an achievement was granted and notified
-    } catch (error) {
-        logger.error(`Error granting achievement ${achievement.id} to user ${userId} on game ${gameId}:`, error);
-        return false;
-    }
+    // Update the game document with the last unlocked achievement details
+    await gameRef.update({
+      lastAchievementUnlocked: {
+        id: achievement.id,
+        name: achievement.name,
+        description: achievement.description,
+        iconUrl: achievement.iconUrl,
+      },
+    });
+    logger.info(`Achievement ${achievement.id} unlocked for user ${userId} and notified on game ${gameId}.`);
+    return true; // Indicates an achievement was granted and notified
+  } catch (error) {
+    logger.error(`Error granting achievement ${achievement.id} to user ${userId} on game ${gameId}:`, error);
+    return false;
+  }
 }
 
 /**
@@ -374,7 +374,7 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
     return;
   }
 
-  const userRef = db.collection('users').doc(userId);
+  const userRef = db.collection("users").doc(userId);
   let userDoc;
   try {
     userDoc = await userRef.get();
@@ -394,19 +394,19 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
     logger.info(`User ${userId} has no stats, skipping achievement check.`);
     // If gameId is provided, clear any stale achievement notification
     if (gameId) {
-        const gameRef = db.collection('games').doc(gameId);
-        try {
-            await gameRef.update({ lastAchievementUnlocked: null });
-        } catch (error) {
-            logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): ${error.message}`);
-        }
+      const gameRef = db.collection("games").doc(gameId);
+      try {
+        await gameRef.update({ lastAchievementUnlocked: null });
+      } catch (error) {
+        logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): ${error.message}`);
+      }
     }
     return;
   }
 
   let unlockedAchievementsSnapshot;
   try {
-    unlockedAchievementsSnapshot = await userRef.collection('unlockedAchievements').get();
+    unlockedAchievementsSnapshot = await userRef.collection("unlockedAchievements").get();
   } catch (error) {
     logger.error(`Failed to retrieve unlocked achievements for ${userId}:`, error);
     return;
@@ -431,7 +431,7 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
         }
       } else {
         // No gameId, so just unlock the achievement without game notification
-        const userAchievementsColRef = userRef.collection('unlockedAchievements');
+        const userAchievementsColRef = userRef.collection("unlockedAchievements");
         try {
           await userAchievementsColRef.doc(achievement.id).set({
             achievementId: achievement.id,
@@ -453,7 +453,7 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
   if (gameId && !newAchievementGrantedInThisCall) {
     // If a gameId was provided, but no new achievement was granted *and notified* in this call,
     // clear the lastAchievementUnlocked field to prevent stale notifications.
-    const gameRef = db.collection('games').doc(gameId);
+    const gameRef = db.collection("games").doc(gameId);
     try {
       await gameRef.update({ lastAchievementUnlocked: null });
       logger.info(`No new achievements for user ${userId} on game ${gameId}. Cleared lastAchievementUnlocked.`);
@@ -476,12 +476,12 @@ export const checkAndGrantAchievements = onCall({ cors: true }, async (request) 
 
   const { userId, gameId } = request.data;
 
-  if (!userId || typeof userId !== 'string') {
+  if (!userId || typeof userId !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Le champ userId (chaîne de caractères) est requis.");
   }
 
   // gameId is optional. If provided, it must be a string.
-  if (gameId !== undefined && (typeof gameId !== 'string' || gameId.length === 0)) {
+  if (gameId !== undefined && (typeof gameId !== "string" || gameId.length === 0)) {
     throw new functions.https.HttpsError("invalid-argument", "Le champ gameId doit être une chaîne de caractères non vide si fourni.");
   }
 
@@ -752,19 +752,19 @@ export const submitQuizResult = onCall({ cors: true }, async (request) => {
   const aUid = request.auth.uid; // Authenticated user
 
   if (aUid !== playerId) {
-      logger.error(`User ${aUid} attempting to submit quiz result for ${playerId}`);
-      throw new functions.https.HttpsError("permission-denied", "You can only submit quiz results for yourself.");
+    logger.error(`User ${aUid} attempting to submit quiz result for ${playerId}`);
+    throw new functions.https.HttpsError("permission-denied", "You can only submit quiz results for yourself.");
   }
 
-  if (typeof wasPerfect !== 'boolean' || typeof playerId !== 'string' || playerId.length === 0) {
+  if (typeof wasPerfect !== "boolean" || typeof playerId !== "string" || playerId.length === 0) {
     throw new functions.https.HttpsError("invalid-argument", "Invalid data for quiz result.");
   }
 
   if (wasPerfect) {
-    const playerDocRef = db.collection('users').doc(playerId);
+    const playerDocRef = db.collection("users").doc(playerId);
     try {
       await playerDocRef.update({
-        'stats.perfectQuizzes': admin.firestore.FieldValue.increment(1)
+        "stats.perfectQuizzes": admin.firestore.FieldValue.increment(1),
       });
       logger.info(`Perfect quiz stat updated for player ${playerId}. GameID: ${gameId}`);
 
@@ -793,7 +793,7 @@ export const submitHangeulTyphoonResult = onCall({ cors: true }, async (request)
   }
   const { gameId, winnerId, playersData } = request.data; // gameId might not be strictly needed for stats if users are known.
 
-  if (typeof winnerId !== 'string' || !Array.isArray(playersData) || playersData.length === 0) {
+  if (typeof winnerId !== "string" || !Array.isArray(playersData) || playersData.length === 0) {
     throw new functions.https.HttpsError("invalid-argument", "Invalid data for Hangeul Typhoon result.");
   }
 
@@ -801,23 +801,23 @@ export const submitHangeulTyphoonResult = onCall({ cors: true }, async (request)
 
   // Update duelsWon for the winner
   if (winnerId && winnerId.length > 0) { // Check if there's a winner
-    const winnerDocRef = db.collection('users').doc(winnerId);
+    const winnerDocRef = db.collection("users").doc(winnerId);
     batch.update(winnerDocRef, {
-      'stats.duelsWon': admin.firestore.FieldValue.increment(1)
+      "stats.duelsWon": admin.firestore.FieldValue.increment(1),
     });
   }
 
   // Update wordsTypedInTyphoon for all participants
   for (const playerData of playersData) {
-    if (typeof playerData.userId === 'string' && playerData.userId.length > 0 && typeof playerData.wordsTyped === 'number' && playerData.wordsTyped >= 0) {
-      const playerDocRef = db.collection('users').doc(playerData.userId);
+    if (typeof playerData.userId === "string" && playerData.userId.length > 0 && typeof playerData.wordsTyped === "number" && playerData.wordsTyped >= 0) {
+      const playerDocRef = db.collection("users").doc(playerData.userId);
       // Only update if wordsTyped is greater than 0, or always record participation?
       // Current logic increments even if 0, which is fine for FieldValue.increment.
       batch.update(playerDocRef, {
-        'stats.wordsTypedInTyphoon': admin.firestore.FieldValue.increment(playerData.wordsTyped)
+        "stats.wordsTypedInTyphoon": admin.firestore.FieldValue.increment(playerData.wordsTyped),
       });
     } else {
-        logger.warn("Invalid player data in playersData array, skipping:", playerData);
+      logger.warn("Invalid player data in playersData array, skipping:", playerData);
     }
   }
 
@@ -834,7 +834,7 @@ export const submitHangeulTyphoonResult = onCall({ cors: true }, async (request)
       }
       for (const playerData of playersData) {
         // Ensure playerData.userId is a valid string before adding
-        if (playerData.userId && typeof playerData.userId === 'string' && playerData.userId.length > 0) {
+        if (playerData.userId && typeof playerData.userId === "string" && playerData.userId.length > 0) {
           userIdsToUpdate.add(playerData.userId);
         }
       }
@@ -899,7 +899,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     throw new HttpsError("failed-precondition", "Impossible de résoudre l'action.");
   }
 
-  let board = [...gameData.board]; // Made mutable
+  const board = [...gameData.board]; // Made mutable
   const players = [...gameData.players];
   const grimoirePositions = [...(gameData.grimoirePositions || [])];
   const currentPlayerIndex = players.findIndex((p: Player) => p.uid === uid);
@@ -1027,48 +1027,48 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     const selectedCard = eventCards[randomIndex] as EventCard; // Ensure type
 
     switch (selectedCard.effect.type) {
-      case "GIVE_MANA":
-        currentPlayer.mana += selectedCard.effect.value;
-        if (currentPlayer.mana < 0) currentPlayer.mana = 0;
-        // if (currentPlayer.mana > MAX_MANA) currentPlayer.mana = MAX_MANA;
-        break;
-      case "MOVE_TO_TILE":
-        // const boardSize = board.length;
-        if (selectedCard.effect.value < 0) { // Moving backwards relative to current position
-          currentPlayer.position = Math.max(0, currentPlayer.position + selectedCard.effect.value);
-        } else { // Moving forwards relative to current position or to a specific tile if value is absolute
-          // Assuming effect.value is relative for now as per example "Sudden Gust of Wind"
-          // If it can be absolute, logic needs to distinguish: e.g. if (selectedCard.effect.isAbsolute) newPos = val
-          currentPlayer.position = (currentPlayer.position + selectedCard.effect.value) % board.length;
-        }
-        // Note: Effect of the new tile is not resolved in this turn.
-        break;
-      case "SKIP_TURN":
-        // players[currentPlayerIndex].skipNextTurn = true; // This would skip current player's next turn.
-        // The instruction implies the *next* player in sequence after current player finishes their turn.
-        // So this flag should be set on the player who would play next.
-        // However, the current design has SKIP_TURN make the *current* player skip their *next* turn.
-        // Let's stick to the spirit of making *someone* skip a turn.
-        // The provided logic snippet for SKIP_TURN handling is at the end of function,
-        // which correctly applies to the *next* player.
-        // So, we mark the current player to have an effect that says "the next turn progression will skip one player"
-        // For now, let's assume `players[currentPlayerIndex].effects` could store this.
-        // Or, as per instructions, a temporary field on game.
-        // The provided snippet sets `players[nextPlayerIndex].skipNextTurn = true;`
-        // This is deferred to the end of the function.
-        // For now, we'll just record the event happened.
-        // The actual skip logic is handled during turn progression.
-        await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true }); // Placeholder for effect
-        break;
-      case "EXTRA_ROLL":
-        players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
-        await gameRef.update({
-          players: players,
-          lastEventCard: { title: selectedCard.title, description: selectedCard.description },
-          // currentPlayerId remains the same
-          turnState: "AWAITING_ROLL", // Player rolls again
-        });
-        return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
+    case "GIVE_MANA":
+      currentPlayer.mana += selectedCard.effect.value;
+      if (currentPlayer.mana < 0) currentPlayer.mana = 0;
+      // if (currentPlayer.mana > MAX_MANA) currentPlayer.mana = MAX_MANA;
+      break;
+    case "MOVE_TO_TILE":
+      // const boardSize = board.length;
+      if (selectedCard.effect.value < 0) { // Moving backwards relative to current position
+        currentPlayer.position = Math.max(0, currentPlayer.position + selectedCard.effect.value);
+      } else { // Moving forwards relative to current position or to a specific tile if value is absolute
+        // Assuming effect.value is relative for now as per example "Sudden Gust of Wind"
+        // If it can be absolute, logic needs to distinguish: e.g. if (selectedCard.effect.isAbsolute) newPos = val
+        currentPlayer.position = (currentPlayer.position + selectedCard.effect.value) % board.length;
+      }
+      // Note: Effect of the new tile is not resolved in this turn.
+      break;
+    case "SKIP_TURN":
+      // players[currentPlayerIndex].skipNextTurn = true; // This would skip current player's next turn.
+      // The instruction implies the *next* player in sequence after current player finishes their turn.
+      // So this flag should be set on the player who would play next.
+      // However, the current design has SKIP_TURN make the *current* player skip their *next* turn.
+      // Let's stick to the spirit of making *someone* skip a turn.
+      // The provided logic snippet for SKIP_TURN handling is at the end of function,
+      // which correctly applies to the *next* player.
+      // So, we mark the current player to have an effect that says "the next turn progression will skip one player"
+      // For now, let's assume `players[currentPlayerIndex].effects` could store this.
+      // Or, as per instructions, a temporary field on game.
+      // The provided snippet sets `players[nextPlayerIndex].skipNextTurn = true;`
+      // This is deferred to the end of the function.
+      // For now, we'll just record the event happened.
+      // The actual skip logic is handled during turn progression.
+      await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true }); // Placeholder for effect
+      break;
+    case "EXTRA_ROLL":
+      players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
+      await gameRef.update({
+        players: players,
+        lastEventCard: { title: selectedCard.title, description: selectedCard.description },
+        // currentPlayerId remains the same
+        turnState: "AWAITING_ROLL", // Player rolls again
+      });
+      return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
     }
 
     players[currentPlayerIndex] = currentPlayer;
@@ -1080,26 +1080,26 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 
   if (!tileEffectApplied) {
     switch (tile.type) {
-      case "MANA_GAIN":
-        currentPlayer.mana += 10;
-        players[currentPlayerIndex] = currentPlayer;
-        break;
-      case "MINI_GAME_QUIZ": // New case
-        logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
-        currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
-        // Optional: Cap mana if a manaMax is defined for the player in-game object
-        // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
-        players[currentPlayerIndex] = currentPlayer;
-        tileEffectApplied = true; // Mark that an effect was applied for this tile
-        // Add a log or event for the client if needed
-        await gameRef.update({
-          players: players, // Update players array with new mana value
-          log: FieldValue.arrayUnion({
-            message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
-            timestamp: FieldValue.serverTimestamp(),
-          }),
-        });
-        break;
+    case "MANA_GAIN":
+      currentPlayer.mana += 10;
+      players[currentPlayerIndex] = currentPlayer;
+      break;
+    case "MINI_GAME_QUIZ": // New case
+      logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
+      currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
+      // Optional: Cap mana if a manaMax is defined for the player in-game object
+      // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
+      players[currentPlayerIndex] = currentPlayer;
+      tileEffectApplied = true; // Mark that an effect was applied for this tile
+      // Add a log or event for the client if needed
+      await gameRef.update({
+        players: players, // Update players array with new mana value
+        log: FieldValue.arrayUnion({
+          message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+      });
+      break;
       // TODO: Add case for HANGEUL_TYPHOON if it's a separate tile type
       // case "HANGEUL_TYPHOON":
       //   currentPlayer.mana += MANA_REWARD_HANGEUL_TYPHOON; // Placeholder for future use
@@ -1113,7 +1113,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
   // --- Turn Progression ---
   let nextPlayerIndex = (currentPlayerIndex + 1) % players.length;
   let nextPlayerId = players[nextPlayerIndex].uid;
-  let nextTurnState = "AWAITING_ROLL";
+  const nextTurnState = "AWAITING_ROLL";
 
   // Handle SKIP_TURN effect for the player whose turn it is about to be
   // This uses a flag on the player object, e.g., `player.skipNextTurn`
@@ -1185,11 +1185,11 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     // players[currentPlayerIndex].skipNextTurn = true; // Set it locally for the save below.
     // This was implicitly done by `await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true });`
     // but to be safe for the *current* `players` array that will be saved:
-    if (gameData.lastEventCard && eventCards.find(c => c.title === gameData.lastEventCard.title)?.effect.type === 'SKIP_TURN') {
-        // Ensure the flag is set on the current player object in the `players` array that will be saved.
-        // This assumes the effect was meant for the current player's *next* turn.
-        // This should be handled by the effect setting `skipNextTurn` on the player object directly.
-        // players[currentPlayerIndex].skipNextTurn = true;
+    if (gameData.lastEventCard && eventCards.find((c) => c.title === gameData.lastEventCard.title)?.effect.type === "SKIP_TURN") {
+      // Ensure the flag is set on the current player object in the `players` array that will be saved.
+      // This assumes the effect was meant for the current player's *next* turn.
+      // This should be handled by the effect setting `skipNextTurn` on the player object directly.
+      // players[currentPlayerIndex].skipNextTurn = true;
     }
   }
 
@@ -1293,8 +1293,8 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
     logger.info(`Game ${gameId} is active (status: ${gameData.status}).`);
 
     // 7. Player Participation Verification & Game State Retrieval
-    const attackerPlayer = gameData.players.find(p => p.uid === attackerPlayerId);
-    const targetPlayer = gameData.players.find(p => p.uid === targetPlayerId);
+    const attackerPlayer = gameData.players.find((p) => p.uid === attackerPlayerId);
+    const targetPlayer = gameData.players.find((p) => p.uid === targetPlayerId);
 
     if (!attackerPlayer) {
       logger.error(`Attacker player ${attackerPlayerId} object not found in game ${gameId} despite prior checks.`);
@@ -1359,7 +1359,7 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
       const destroyedBlockWord = targetBlock.text;
       const targetGroundRiseAmount = DEFAULT_GROUND_RISE_AMOUNT;
       const newTargetGroundHeight = (targetPlayer.groundHeight || 0) + targetGroundRiseAmount;
-      const updatedPlayers = gameData.players.map(p => {
+      const updatedPlayers = gameData.players.map((p) => {
         if (p.uid === targetPlayer.uid) {
           return { ...p, blocks: updatedTargetBlocks, groundHeight: newTargetGroundHeight };
         }
@@ -1383,7 +1383,7 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
       const attackerPenaltyGroundRiseAmount = DEFAULT_PENALTY_RISE_AMOUNT;
       const newAttackerGroundHeight = (attackerPlayer.groundHeight || 0) + attackerPenaltyGroundRiseAmount;
       logger.info(`Processing failed attack for attacker: ${attackerPlayer.uid}. Reason: ${failureReason}. Applying penalty of ${attackerPenaltyGroundRiseAmount}. New ground height: ${newAttackerGroundHeight}`);
-      const updatedPlayers = gameData.players.map(p => {
+      const updatedPlayers = gameData.players.map((p) => {
         if (p.uid === attackerPlayer.uid) {
           return { ...p, groundHeight: newAttackerGroundHeight };
         }
@@ -1433,7 +1433,7 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
 
   const casterIndex = gameData.players.findIndex((p: Player) => p.uid === uid);
   let targetIndex = -1;
-  if (spell.type !== 'TERRAIN' && typeof targetId === 'string') { // TERRAIN spells might not have a player targetId
+  if (spell.type !== "TERRAIN" && typeof targetId === "string") { // TERRAIN spells might not have a player targetId
     targetIndex = gameData.players.findIndex((p: Player) => p.uid === targetId);
   }
 
@@ -1442,13 +1442,13 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   if (casterIndex === -1) {
     throw new HttpsError("not-found", "Caster not found.");
   }
-  if (spell.type !== 'TERRAIN' && spell.id !== 'MANA_SHIELD' && targetIndex === -1) { // MANA_SHIELD targets self, TERRAIN might not target a player
+  if (spell.type !== "TERRAIN" && spell.id !== "MANA_SHIELD" && targetIndex === -1) { // MANA_SHIELD targets self, TERRAIN might not target a player
     throw new HttpsError("not-found", "Target player not found for this spell type.");
   }
-  if (spell.id !== 'MANA_SHIELD' && spell.type !== 'TERRAIN' && uid === targetId) { // Allow self-target only for MANA_SHIELD (TERRAIN has no player target)
+  if (spell.id !== "MANA_SHIELD" && spell.type !== "TERRAIN" && uid === targetId) { // Allow self-target only for MANA_SHIELD (TERRAIN has no player target)
     throw new HttpsError("invalid-argument", "Cannot target self with this spell.");
   }
-  if (spell.id === 'MANA_SHIELD' && uid !== targetId) {
+  if (spell.id === "MANA_SHIELD" && uid !== targetId) {
     throw new HttpsError("invalid-argument", "MANA_SHIELD must target self.");
   }
 
@@ -1461,9 +1461,9 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   players[casterIndex].mana -= spell.manaCost;
 
   // Increment spellsCast stat for the caster
-  const casterStatsRef = db.collection('users').doc(uid);
+  const casterStatsRef = db.collection("users").doc(uid);
   await casterStatsRef.update({
-    'stats.spellsCast': admin.firestore.FieldValue.increment(1)
+    "stats.spellsCast": admin.firestore.FieldValue.increment(1),
   }).catch((error) => {
     logger.error(`Erreur lors de la mise à jour de stats.spellsCast pour ${uid}:`, error);
     // Continue even if stat update fails, core game logic is more critical.
@@ -1479,50 +1479,50 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
   switch (spell.id) {
-    case "BLESSING_OF_HANGEUL":
-      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
-      players[targetIndex].mana += 10; // Changed from 5 to 10
-      break;
-    case "KIMCHIS_MALICE":
-      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
-      players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
-      break;
-    case "RUNE_TRAP":
-      if (typeof options?.tileIndex !== 'number' || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
-        throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
-      }
-      const boardCopy = [...gameData.board];
-      boardCopy[options.tileIndex] = { ...boardCopy[options.tileIndex], trap: { ownerId: uid, spellId: spell.id } }; // Added spellId to trap
-      await gameRef.update({
-        players: players,
-        board: boardCopy,
-        lastSpellCast: { spellId, casterId: uid, options },
-      });
-      // Note: spellsCast was already incremented before the switch.
-      return { success: true }; // Return early as board update is specific
-    case "MANA_SHIELD":
-      // Target is self, casterIndex is used.
-      const existingEffects = players[casterIndex].effects || [];
-      const hasShield = existingEffects.some((effect: {type: string}) => effect.type === 'SHIELDED');
-      if (!hasShield) {
-        players[casterIndex].effects = [...existingEffects, { type: 'SHIELDED', duration: 1, spellId: spell.id }]; // Duration changed to 1
-      } else {
-        players[casterIndex].effects = existingEffects.map((effect: {type: string, duration: number}) =>
-          effect.type === 'SHIELDED' ? { ...effect, duration: 1 } : effect // Duration changed to 1
-        );
-      }
-      break;
-    case "ASTRAL_SWAP":
-      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
-      if (uid === targetId) { // Should be caught by earlier general check but good to have specific
-        throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
-      }
-      // player1Index is casterIndex
-      const pos1 = players[casterIndex].position;
-      const pos2 = players[targetIndex].position;
-      players[casterIndex].position = pos2;
-      players[targetIndex].position = pos1;
-      break;
+  case "BLESSING_OF_HANGEUL":
+    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
+    players[targetIndex].mana += 10; // Changed from 5 to 10
+    break;
+  case "KIMCHIS_MALICE":
+    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
+    players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
+    break;
+  case "RUNE_TRAP":
+    if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
+      throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
+    }
+    const boardCopy = [...gameData.board];
+    boardCopy[options.tileIndex] = { ...boardCopy[options.tileIndex], trap: { ownerId: uid, spellId: spell.id } }; // Added spellId to trap
+    await gameRef.update({
+      players: players,
+      board: boardCopy,
+      lastSpellCast: { spellId, casterId: uid, options },
+    });
+    // Note: spellsCast was already incremented before the switch.
+    return { success: true }; // Return early as board update is specific
+  case "MANA_SHIELD":
+    // Target is self, casterIndex is used.
+    const existingEffects = players[casterIndex].effects || [];
+    const hasShield = existingEffects.some((effect: {type: string}) => effect.type === "SHIELDED");
+    if (!hasShield) {
+      players[casterIndex].effects = [...existingEffects, { type: "SHIELDED", duration: 1, spellId: spell.id }]; // Duration changed to 1
+    } else {
+      players[casterIndex].effects = existingEffects.map((effect: {type: string, duration: number}) =>
+        effect.type === "SHIELDED" ? { ...effect, duration: 1 } : effect // Duration changed to 1
+      );
+    }
+    break;
+  case "ASTRAL_SWAP":
+    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
+    if (uid === targetId) { // Should be caught by earlier general check but good to have specific
+      throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
+    }
+    // player1Index is casterIndex
+    const pos1 = players[casterIndex].position;
+    const pos2 = players[targetIndex].position;
+    players[casterIndex].position = pos2;
+    players[targetIndex].position = pos1;
+    break;
   }
 
   await gameRef.update({

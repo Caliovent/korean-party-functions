@@ -10,7 +10,7 @@ interface SpellDefinition {
   id: SpellId;
   name: string; // Added
   manaCost: number;
-  type: 'TERRAIN' | 'DEFENSIVE' | 'STRATEGIC' | 'OFFENSIVE'; // Added
+  type: "TERRAIN" | "DEFENSIVE" | "STRATEGIC" | "OFFENSIVE"; // Added
   description: string; // Added
 }
 
@@ -32,24 +32,24 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
   },
   // New Spells
   RUNE_TRAP: {
-    id: 'RUNE_TRAP',
-    name: 'Piège Runique',
+    id: "RUNE_TRAP",
+    name: "Piège Runique",
     manaCost: 35,
-    type: 'TERRAIN',
-    description: 'Pose un piège sur une case. Le prochain joueur à s\'y arrêter perd 50 Mana.',
+    type: "TERRAIN",
+    description: "Pose un piège sur une case. Le prochain joueur à s'y arrêter perd 50 Mana.",
   },
   MANA_SHIELD: {
-    id: 'MANA_SHIELD',
-    name: 'Bouclier de Mana',
+    id: "MANA_SHIELD",
+    name: "Bouclier de Mana",
     manaCost: 50,
-    type: 'DEFENSIVE',
-    description: 'Annule le prochain sort négatif qui vous cible. Dure 1 tour.',
+    type: "DEFENSIVE",
+    description: "Annule le prochain sort négatif qui vous cible. Dure 1 tour.",
   },
   ASTRAL_SWAP: {
-    id: 'ASTRAL_SWAP',
-    name: 'Échange Astral',
+    id: "ASTRAL_SWAP",
+    name: "Échange Astral",
     manaCost: 90,
-    type: 'STRATEGIC',
-    description: 'Échangez votre position avec celle d\'un autre joueur.',
+    type: "STRATEGIC",
+    description: "Échangez votre position avec celle d'un autre joueur.",
   },
 };

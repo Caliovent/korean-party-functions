@@ -8,7 +8,7 @@
  * Formula: XP_requis = 100 * (level ^ 1.5)
  *
  * @param level The level for which to calculate the XP requirement.
- * @returns The total XP needed to reach that level.
+ * @return The total XP needed to reach that level.
  */
 export const getXpForLevel = (level: number): number => {
   if (level <= 0) {
