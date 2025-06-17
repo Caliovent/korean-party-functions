@@ -49,6 +49,6 @@ export const eventCards: EventCard[] = [
     id: "EVENT_007",
     title: "Sudden Gust of Wind",
     description: "A sudden gust of wind pushes you back a few spaces.",
-    effect: { type: "MOVE_TO_TILE", value: -3 }, // Negative value for moving backwards, will need to be handled in resolveTileAction
+    effect: { type: "MOVE_TO_TILE", value: -3 }, // Negative value for moving backwards
   },
 ];

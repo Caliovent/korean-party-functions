@@ -26,7 +26,7 @@ export interface Player {
     type: string; // e.g., 'SHIELDED', 'SKIP_TURN'
     duration: number;
     spellId?: SpellId; // Optional: to know which spell caused the effect
-    [key: string]: any; // Optional: for future flexibility
+    [key: string]: unknown; // Optional: for future flexibility
   }>;
   skipNextTurn?: boolean; // Will be conceptually replaced by effects array
   groundHeight: number; // Hangeul Typhoon
@@ -60,7 +60,7 @@ export interface Game {
     spellId: SpellId;
     casterId: string;
     targetId?: string; // Can be null for terrain spells like RUNE_TRAP
-    options?: any; // For additional data like tileIndex for RUNE_TRAP
+    options?: Record<string, unknown>; // For additional data like tileIndex for RUNE_TRAP
   };
   lastEventCard?: { // Added to store information about the last drawn event card
     title: string;

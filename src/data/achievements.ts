@@ -129,4 +129,5 @@ export const ALL_ACHIEVEMENTS: Achievement[] = [
 // Ensure UserStats matches the structure of the `stats` object in `UserProfile` from `src/types.ts`.
 // The `id` for achievements should be unique and preferably in a format like 'SPELL_MASTER_1' as per the issue,
 // I've used a mix but will ensure they are descriptive strings.
-// Icon URLs are placeholders; actual URLs would be needed. Using gs:// paths as an example if they are stored in Cloud Storage.
+// Icon URLs are placeholders; actual URLs would be needed.
+// Using gs:// paths as an example if they are stored in Cloud Storage.
