@@ -4,19 +4,42 @@
  * pour l'ensemble des Cloud Functions du projet Korean Party.
  */
 import { SpellId } from "./spells";
+import * as admin from "firebase-admin";
 
 // Représente l'état d'un joueur dans une partie
+
+// Hangeul Typhoon Game Mechanics
+export interface TyphoonBlock {
+  id: string;
+  text: string;
+  vulnerableAt: admin.firestore.Timestamp;
+  isDestroyed: boolean;
+}
+
 export interface Player {
   uid: string;
   displayName: string;
   position: number;
   mana: number;
   grimoires: number; // AJOUT : Nombre de grimoires collectés
+  effects?: Array<{ // Added
+    type: string; // e.g., 'SHIELDED', 'SKIP_TURN'
+    duration: number;
+    spellId?: SpellId; // Optional: to know which spell caused the effect
+    [key: string]: unknown; // Optional: for future flexibility
+  }>;
+  skipNextTurn?: boolean; // Will be conceptually replaced by effects array
+  groundHeight: number; // Hangeul Typhoon
+  blocks: TyphoonBlock[]; // Hangeul Typhoon
 }
 
 // Définition d'une case de jeu
 export interface Tile {
-  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ";
+  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ" | "event"; // Added "event" type
+  trap?: { // Added for RUNE_TRAP
+    ownerId: string;
+    spellId: SpellId; // To identify the trap type if multiple trap spells exist
+  };
   // On pourra ajouter d'autres propriétés plus tard (ex: manaValue: 10)
 }
 
@@ -27,7 +50,7 @@ export interface Game {
   status: "waiting" | "playing" | "finished";
   players: Player[];
   currentPlayerId?: string;
-  turnState?: "AWAITING_ROLL" | "RESOLVING_TILE";
+  turnState?: "AWAITING_ROLL" | "RESOLVING_TILE" | "ENDED"; // Added "ENDED" state
   lastDiceRoll?: number;
   board?: Tile[]; // AJOUT : Le plateau de jeu de la session
   grimoirePositions?: number[]; // Positions des grimoires sur le plateau
@@ -36,9 +59,15 @@ export interface Game {
   lastSpellCast?: {
     spellId: SpellId;
     casterId: string;
-    targetId: string;
+    targetId?: string; // Can be null for terrain spells like RUNE_TRAP
+    options?: Record<string, unknown>; // For additional data like tileIndex for RUNE_TRAP
   };
-  createdAt: FirebaseFirestore.Timestamp;
+  lastEventCard?: { // Added to store information about the last drawn event card
+    title: string;
+    description: string;
+    // id?: string; // if needed to reference back to eventCards data
+  };
+  createdAt: admin.firestore.Timestamp;
 }
 
 // Represents a member of a Guild
@@ -54,7 +83,7 @@ export interface Guild {
   tag: string; // Guild tag, unique, short (e.g., 3-5 chars)
   leaderId: string; // UID of the player who is the leader
   members: GuildMember[]; // Array of guild members
-  createdAt: FirebaseFirestore.Timestamp; // Server timestamp of creation
+  createdAt: admin.firestore.Timestamp; // Server timestamp of creation
 }
 
 // It seems UserProfile is implicitly defined in src/index.ts's createProfileOnSignup.
@@ -69,6 +98,47 @@ export interface UserProfile {
   manaCurrent: number;
   manaMax: number;
   fragments: { vocab: number; grammar: number; culture: number };
-  createdAt: FirebaseFirestore.Timestamp;
+  createdAt: admin.firestore.Timestamp;
   guildId?: string; // Optional: ID of the guild the user belongs to
+  // Add the new stats object below
+  stats: {
+    gamesPlayed: number;
+    gamesWon: number;
+    duelsWon: number; // Nombre de duels "Hangeul Typhoon" gagnés
+    spellsCast: number; // Nombre total de sorts lancés
+    grimoiresCollected: number; // Nombre total de grimoires collectés à travers toutes les parties
+    wordsTypedInTyphoon: number; // Nombre total de mots corrects tapés dans "Hangeul Typhoon"
+    perfectQuizzes: number; // Nombre de mini-jeux de quiz réussis sans erreur
+  };
 }
+
+// Request Payload Interface for Hangeul Typhoon Attack
+export interface SendTyphoonAttackRequest {
+  gameId: string;
+  attackerPlayerId: string;
+  targetPlayerId: string;
+  attackWord: string;
+}
+
+// Response Payload Interfaces for Hangeul Typhoon Attack
+export interface SendTyphoonAttackResponseBase {
+  status: "success" | "failure";
+  attackerPlayerId: string;
+}
+
+export interface SendTyphoonAttackSuccessResponse extends SendTyphoonAttackResponseBase {
+  status: "success";
+  message: string;
+  targetPlayerId: string;
+  destroyedBlockWord: string;
+  targetGroundRiseAmount: number;
+}
+
+export interface SendTyphoonAttackFailureResponse extends SendTyphoonAttackResponseBase {
+  status: "failure";
+  reason: string;
+  message: string;
+  attackerPenaltyGroundRiseAmount: number;
+}
+
+export type SendTyphoonAttackResponse = SendTyphoonAttackSuccessResponse | SendTyphoonAttackFailureResponse;
