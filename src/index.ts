@@ -335,6 +335,9 @@ import { ALL_ACHIEVEMENTS, Achievement, UserStats } from "./data/achievements";
 
 /**
  * Helper function to grant a single achievement and update the game document.
+ * @param {string} userId
+ * @param {string} gameId
+ * @param {Achievement} achievement
  */
 async function grantSingleAchievement(userId: string, gameId: string, achievement: Achievement) {
   const userAchievementsRef = db.collection("users").doc(userId).collection("unlockedAchievements");
@@ -367,6 +370,8 @@ async function grantSingleAchievement(userId: string, gameId: string, achievemen
 /**
  * Core logic for checking and granting achievements.
  * Can be called internally by other Cloud Functions.
+ * @param {string} userId
+ * @param {string} gameId
  */
 export async function checkAndGrantAchievementsInternal(userId: string, gameId: string | null) {
   if (!userId) {
@@ -1135,8 +1140,8 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
   if (playerAboutToPlay.skipNextTurn) {
     logger.info(`Player ${playerAboutToPlay.displayName} (${playerAboutToPlay.uid}) is skipping their turn.`);
     // Remove the skipNextTurn flag from this player
-    const { skipNextTurn, ...restOfPlayerProperties } = playerAboutToPlay;
-    players[nextPlayerIndex] = restOfPlayerProperties as Player; // Update in local players array
+    delete playerAboutToPlay.skipNextTurn;
+    players[nextPlayerIndex] = playerAboutToPlay as Player; // Update in local players array
 
     // The turn passes to the player *after* the one who is skipping.
     nextPlayerIndex = (nextPlayerIndex + 1) % players.length;
@@ -1479,15 +1484,17 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
   switch (spell.id) {
-  case "BLESSING_OF_HANGEUL":
+  case "BLESSING_OF_HANGEUL": {
     if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
     players[targetIndex].mana += 10; // Changed from 5 to 10
     break;
-  case "KIMCHIS_MALICE":
+  }
+  case "KIMCHIS_MALICE": {
     if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
     players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
     break;
-  case "RUNE_TRAP":
+  }
+  case "RUNE_TRAP": {
     if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
       throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
     }
@@ -1500,7 +1507,8 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
     });
     // Note: spellsCast was already incremented before the switch.
     return { success: true }; // Return early as board update is specific
-  case "MANA_SHIELD":
+  }
+  case "MANA_SHIELD": {
     // Target is self, casterIndex is used.
     const existingEffects = players[casterIndex].effects || [];
     const hasShield = existingEffects.some((effect: {type: string}) => effect.type === "SHIELDED");
@@ -1512,7 +1520,8 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
       );
     }
     break;
-  case "ASTRAL_SWAP":
+  }
+  case "ASTRAL_SWAP": {
     if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
     if (uid === targetId) { // Should be caught by earlier general check but good to have specific
       throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
@@ -1523,6 +1532,7 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
     players[casterIndex].position = pos2;
     players[targetIndex].position = pos1;
     break;
+  }
   }
 
   await gameRef.update({
