@@ -408,6 +408,7 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
         } else {
           logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): An unknown error occurred`);
         }
+
       }
     }
     return;
@@ -1474,6 +1475,7 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   if (spell.id === "MANA_SHIELD" && uid !== targetId) {
     throw new HttpsError("invalid-argument", "MANA_SHIELD must target self.");
   }
+
 
 
   const players = [...gameData.players];
