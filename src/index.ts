@@ -59,6 +59,10 @@ const db = admin.firestore();
 //                    GESTION DES UTILISATEURS ET PROFILS
 // =================================================================
 
+// TODO: Review and remove one of the two redundant user creation functions.
+// Both `createProfileOnSignup` and `onUserCreate` are triggered on user creation (`functionsV1.auth.user().onCreate`).
+// Keeping both can lead to duplicate data or unintended side effects.
+// It's recommended to consolidate the logic into a single function.
 // V2: Use functions.identity.user() instead of functions.auth.user()
 export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (user) => {
   const { uid, email } = user;
@@ -112,7 +116,7 @@ export const onUserCreate = functionsV1
         uid: uid,
         email: email || "",
         displayName: initialdisplayName,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         rank: "Apprenti Runique",
         mana: 100,
         grimoires: [],
