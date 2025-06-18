@@ -8,7 +8,7 @@ import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour 
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
 import { getXpForLevel } from "./xpUtils";
-import { Player, Tile, Guild, GuildMember, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse } from "./types"; // Added Game
+import { Player, Tile, Guild, Grimoire, GuildMember, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse } from "./types"; // Added Game
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards, EventCard } from "./data/eventCards";
 
@@ -68,7 +68,7 @@ export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (use
   }
   const userProfile = {
     email: email,
-    pseudo: email.split("@")[0],
+    displayName: email.split("@")[0],
     level: 1,
     xp: 0,
     manaCurrent: 100,
@@ -105,13 +105,13 @@ export const onUserCreate = functionsV1
 
     const userRef = admin.firestore().collection("users").doc(uid);
 
-    const initialDisplayName = displayName || (email ? email.split('@')[0] : `Sorcier_${uid.substring(0, 5)}`);
+    const initialdisplayName = displayName || (email ? email.split("@")[0] : `Sorcier_${uid.substring(0, 5)}`);
 
     try {
       await userRef.set({
         uid: uid,
         email: email || "",
-        displayName: initialDisplayName,
+        displayName: initialdisplayName,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         rank: "Apprenti Runique",
         mana: 100,
@@ -126,7 +126,6 @@ export const onUserCreate = functionsV1
       });
 
       console.log(`[Auth Trigger] Firestore document successfully created for user ${uid}.`);
-
     } catch (error) {
       console.error(
         `[Auth Trigger] Error creating Firestore document for user ${uid}:`,
@@ -140,12 +139,12 @@ export const onUserCreate = functionsV1
 
 export const updateUserProfile = onCall({ cors: true }, async (request) => {
   if (!request.auth) throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
-  const { pseudo } = request.data;
+  const { displayName } = request.data;
   const { uid } = request.auth;
-  if (typeof pseudo !== "string" || pseudo.length < 3 || pseudo.length > 20) {
-    throw new functions.https.HttpsError("invalid-argument", "Le pseudo doit contenir entre 3 et 20 caractères.");
+  if (typeof displayName !== "string" || displayName.length < 3 || displayName.length > 20) {
+    throw new functions.https.HttpsError("invalid-argument", "Le displayName doit contenir entre 3 et 20 caractères.");
   }
-  await admin.firestore().collection("users").doc(uid).update({ pseudo });
+  await admin.firestore().collection("users").doc(uid).update({ displayName });
   return { status: "succès" };
 });
 
@@ -183,7 +182,7 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
       if (userData?.guildId) {
         throw new HttpsError("failed-precondition", "Vous êtes déjà membre d'une guilde.");
       }
-      const displayName = userData?.pseudo || "Sorcier Anonyme"; // Use pseudo as displayName
+      const displayName = userData?.displayName || "Sorcier Anonyme"; // Use displayName as displayName
 
       // 4. Check for uniqueness of guild name and tag
       const nameQuery = guildsRef.where("name", "==", name);
@@ -253,7 +252,7 @@ export const joinGuild = onCall({ cors: true }, async (request: functions.https.
       if (userData?.guildId) {
         throw new HttpsError("failed-precondition", "Vous êtes déjà membre d'une guilde.");
       }
-      const displayName = userData?.pseudo || "Sorcier Anonyme"; // Use pseudo
+      const displayName = userData?.displayName || "Sorcier Anonyme"; // Use displayName
 
       // 4. Get guild
       const guildDoc = await transaction.get(guildRef);
@@ -410,7 +409,6 @@ export const deleteGame = onCall(async (request) => {
 
     logger.log(`Game ${gameId} successfully deleted by host ${uid}.`);
     return { success: true, message: "Partie supprimée avec succès." };
-
   } catch (error) {
     logger.error(`Error deleting game ${gameId} for user ${uid}:`, error);
     // On re-throw l'erreur pour que le client soit notifié
@@ -650,7 +648,7 @@ export const createGame = onCall({ cors: true }, async (request: functions.https
       displayName: displayName,
       position: 0,
       mana: 20,
-      grimoires: 0, // CORRECTION : Initialisation du champ manquant
+      grimoires: [],
       groundHeight: 0, // Added
       blocks: [], // Added
     };
@@ -735,14 +733,15 @@ export const joinGame = onCall({ cors: true }, async (request: functions.https.C
       displayName: displayName,
       position: 0,
       mana: 20,
-      grimoires: 0, // Initialiser les grimoires à 0
+      grimoires: [], // Initialiser les grimoires à 0
       groundHeight: 0, // Added
       blocks: [], // Added
     };
+    const updatedPlayers = [...players, newPlayer];
 
     // 5. Ajout atomique du joueur à la partie
     await gameRef.update({
-      players: FieldValue.arrayUnion(newPlayer),
+      players: updatedPlayers,
     });
 
     // 5a. Update hub_state for the joining player
@@ -1079,7 +1078,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
         const playerRef = db.collection("users").doc(player.uid);
         batch.update(playerRef, {
           "stats.gamesPlayed": admin.firestore.FieldValue.increment(1),
-          "stats.grimoiresCollected": admin.firestore.FieldValue.increment(player.grimoires || 0),
+          "stats.grimoiresCollected": admin.firestore.FieldValue.increment((player.grimoires?.length ?? 0)),
         });
 
         if (player.uid === gameWinnerId) { // Corrected to use gameWinnerId

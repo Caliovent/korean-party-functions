@@ -22,7 +22,7 @@ This document outlines the conceptual unit tests for the guild management Cloud 
             *   `name` matching the input.
             *   `tag` matching the input.
             *   `leaderId` matching `auth.uid`.
-            *   `members` array containing one `GuildMember` object: `{ uid: auth.uid, displayName: user.pseudo }`.
+            *   `members` array containing one `GuildMember` object: `{ uid: auth.uid, displayName: user.displayName }`.
             *   `createdAt` is a valid Firestore Timestamp.
         *   The user's document in the `users` collection is updated to include `guildId` (matching the new guild's ID).
         *   The function returns an object like `{ guildId: "new-guild-id", message: "Guilde créée avec succès !" }`.
@@ -94,7 +94,7 @@ This document outlines the conceptual unit tests for the guild management Cloud 
         *   User profile exists for `auth.uid` without a `guildId`.
         *   Target guild document exists in `guilds` with a `members` array.
     *   **Expected Outcome:**
-        *   The user's `GuildMember` object (`{ uid: auth.uid, displayName: user.pseudo }`) is added to the target guild's `members` array using `FieldValue.arrayUnion`.
+        *   The user's `GuildMember` object (`{ uid: auth.uid, displayName: user.displayName }`) is added to the target guild's `members` array using `FieldValue.arrayUnion`.
         *   The user's document in the `users` collection is updated with `guildId` (matching the target guild's ID).
         *   The function returns an object like `{ message: "Vous avez rejoint la guilde \"Guild Name\" avec succès !" }`.
 

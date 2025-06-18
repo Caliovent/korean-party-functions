@@ -21,7 +21,7 @@ export interface Player {
   displayName: string;
   position: number;
   mana: number;
-  grimoires: number; // AJOUT : Nombre de grimoires collectés
+  grimoires: Grimoire[];
   effects?: Array<{ // Added
     type: string; // e.g., 'SHIELDED', 'SKIP_TURN'
     duration: number;
@@ -32,6 +32,19 @@ export interface Player {
   groundHeight: number; // Hangeul Typhoon
   blocks: TyphoonBlock[]; // Hangeul Typhoon
 }
+
+export interface Grimoire {
+  id: string;
+  name: string;
+  progress: number; // Progress towards completion
+  target: number; // Target number of words to complete the grimoire
+  // Additional properties can be added later, e.g., description, image URL
+  // For now, we keep it simple
+  // to focus on the core game mechanics.
+//   description?: string; // Optional: description of the grimoire
+//   imageUrl?: string; // Optional: URL to an image representing the grimoire
+}
+
 
 // Définition d'une case de jeu
 export interface Tile {
@@ -92,7 +105,7 @@ export interface Guild {
 // For now, let's add a UserProfile interface for completeness.
 export interface UserProfile {
   email: string;
-  pseudo: string;
+  displayName: string;
   level: number;
   xp: number;
   manaCurrent: number;
