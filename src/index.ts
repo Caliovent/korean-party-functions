@@ -90,6 +90,54 @@ export const createProfileOnSignup = functionsV1.auth.user().onCreate(async (use
   return null;
 });
 
+
+/**
+ * Déclencheur qui s'active à la création d'un nouvel utilisateur
+ * dans Firebase Authentication pour créer son profil dans Firestore.
+ */
+export const onUserCreate = functionsV1
+  .region("europe-west1") // Important de spécifier la même région que vos autres fonctions
+  .auth.user()
+  .onCreate(async (user) => {
+    const { uid, email, displayName } = user;
+
+    console.log(`[Auth Trigger] New user detected: ${uid} (${email}). Creating Firestore profile.`);
+
+    const userRef = admin.firestore().collection("users").doc(uid);
+
+    const initialDisplayName = displayName || (email ? email.split('@')[0] : `Sorcier_${uid.substring(0, 5)}`);
+
+    try {
+      await userRef.set({
+        uid: uid,
+        email: email || "",
+        displayName: initialDisplayName,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        rank: "Apprenti Runique",
+        mana: 100,
+        grimoires: [],
+        fragments: {
+          dark: 0,
+          light: 0,
+          nature: 0,
+        },
+        activeQuests: [],
+        completedQuests: [],
+      });
+
+      console.log(`[Auth Trigger] Firestore document successfully created for user ${uid}.`);
+
+    } catch (error) {
+      console.error(
+        `[Auth Trigger] Error creating Firestore document for user ${uid}:`,
+        error
+      );
+    }
+  });
+
+
+
+
 export const updateUserProfile = onCall({ cors: true }, async (request) => {
   if (!request.auth) throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
   const { pseudo } = request.data;
@@ -326,6 +374,53 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
   }
 });
 
+
+/**
+ * Permet à un utilisateur de supprimer une partie dont il est l'hôte.
+ */
+export const deleteGame = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  const gameId = request.data.gameId;
+
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour supprimer une partie.");
+  }
+
+  if (!gameId || typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie est manquant ou invalide.");
+  }
+
+  const gameRef = admin.firestore().collection("games").doc(gameId);
+
+  try {
+    const gameDoc = await gameRef.get();
+
+    if (!gameDoc.exists) {
+      throw new HttpsError("not-found", "La partie que vous essayez de supprimer n'existe pas.");
+    }
+
+    const gameData = gameDoc.data();
+    if (gameData?.hostId !== uid) {
+      // Ce n'est pas l'hôte qui fait la demande, on refuse.
+      throw new HttpsError("permission-denied", "Vous n'êtes pas l'hôte de cette partie, vous ne pouvez pas la supprimer.");
+    }
+
+    // La vérification a réussi, on peut supprimer le document.
+    await gameRef.delete();
+
+    logger.log(`Game ${gameId} successfully deleted by host ${uid}.`);
+    return { success: true, message: "Partie supprimée avec succès." };
+
+  } catch (error) {
+    logger.error(`Error deleting game ${gameId} for user ${uid}:`, error);
+    // On re-throw l'erreur pour que le client soit notifié
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la suppression de la partie.");
+  }
+});
+
 // =================================================================
 //                    ACHIEVEMENT FUNCTIONS
 // =================================================================
@@ -515,34 +610,6 @@ export const checkAndGrantAchievements = onCall({ cors: true }, async (request) 
   }
 });
 
-/**
- * Se déclenche à la création d'un nouvel utilisateur dans Firebase Authentication.
- * Crée un document correspondant dans la collection 'users' de Firestore.
- */
-export const onUserCreate = functionsV1.region("europe-west1").auth.user().onCreate(async (user) => {
-  logger.info(`Nouvel utilisateur détecté: ${user.uid}, création du profil...`);
-
-  const newUserProfile = {
-    uid: user.uid,
-    email: user.email,
-    displayName: user.displayName || `Apprenti-${user.uid.substring(0, 5)}`,
-    createdAt: FieldValue.serverTimestamp(),
-    level: 1,
-    xp: 0,
-    xpForNextLevel: getXpForLevel(1),
-    mana: 100, // Mana de départ
-    grimoires: 0, // Grimoires collectés
-    position: 0,
-    // Ajoutez ici d'autres champs par défaut si nécessaire
-  };
-
-  try {
-    await admin.firestore().collection("users").doc(user.uid).set(newUserProfile);
-    logger.info(`Profil pour l'utilisateur ${user.uid} créé avec succès.`);
-  } catch (error) {
-    logger.error(`Erreur lors de la création du profil pour ${user.uid}:`, error);
-  }
-});
 
 // =================================================================
 //                    GESTION DU LOBBY ET DES PARTIES
