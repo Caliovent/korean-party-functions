@@ -1261,6 +1261,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
       currentPlayerId: nextPlayerId,
       turnState: nextTurnState,
       lastEventCard: null, // Reset for the new turn
+      lastDiceRoll: null, // Requirement: Reset lastDiceRoll
     });
     return { success: true, effect: "TURN_SKIPPED", skippedPlayerId: playerAboutToPlay.uid };
   }
@@ -1327,6 +1328,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     currentPlayerId: nextPlayerId,
     turnState: nextTurnState,
     lastEventCard: null, // Reset for the new turn (unless an EXTRA_ROLL happened)
+    lastDiceRoll: null, // Requirement: Reset lastDiceRoll
   });
   return { success: true };
 });
