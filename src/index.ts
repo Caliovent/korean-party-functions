@@ -408,7 +408,6 @@ export async function checkAndGrantAchievementsInternal(userId: string, gameId: 
         } else {
           logger.warn(`Could not clear lastAchievementUnlocked for game ${gameId} (user has no stats): An unknown error occurred`);
         }
-
       }
     }
     return;
@@ -516,6 +515,34 @@ export const checkAndGrantAchievements = onCall({ cors: true }, async (request) 
   }
 });
 
+/**
+ * Se déclenche à la création d'un nouvel utilisateur dans Firebase Authentication.
+ * Crée un document correspondant dans la collection 'users' de Firestore.
+ */
+export const onUserCreate = functionsV1.region("europe-west1").auth.user().onCreate(async (user) => {
+  logger.info(`Nouvel utilisateur détecté: ${user.uid}, création du profil...`);
+
+  const newUserProfile = {
+    uid: user.uid,
+    email: user.email,
+    displayName: user.displayName || `Apprenti-${user.uid.substring(0, 5)}`,
+    createdAt: FieldValue.serverTimestamp(),
+    level: 1,
+    xp: 0,
+    xpForNextLevel: getXpForLevel(1),
+    mana: 100, // Mana de départ
+    grimoires: 0, // Grimoires collectés
+    position: 0,
+    // Ajoutez ici d'autres champs par défaut si nécessaire
+  };
+
+  try {
+    await admin.firestore().collection("users").doc(user.uid).set(newUserProfile);
+    logger.info(`Profil pour l'utilisateur ${user.uid} créé avec succès.`);
+  } catch (error) {
+    logger.error(`Erreur lors de la création du profil pour ${user.uid}:`, error);
+  }
+});
 
 // =================================================================
 //                    GESTION DU LOBBY ET DES PARTIES
@@ -567,7 +594,7 @@ export const createGame = onCall({ cors: true }, async (request: functions.https
       hostId: uid,
       status: "waiting" as const,
       players: [hostPlayer],
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(), // Doit utiliser le 'FieldValue' importé
     };
 
     // 6. Ajout du document à Firestore
@@ -1047,48 +1074,48 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     const selectedCard = eventCards[randomIndex] as EventCard; // Ensure type
 
     switch (selectedCard.effect.type) {
-    case "GIVE_MANA":
-      currentPlayer.mana += selectedCard.effect.value;
-      if (currentPlayer.mana < 0) currentPlayer.mana = 0;
-      // if (currentPlayer.mana > MAX_MANA) currentPlayer.mana = MAX_MANA;
-      break;
-    case "MOVE_TO_TILE":
-      // const boardSize = board.length;
-      if (selectedCard.effect.value < 0) { // Moving backwards relative to current position
-        currentPlayer.position = Math.max(0, currentPlayer.position + selectedCard.effect.value);
-      } else { // Moving forwards relative to current position or to a specific tile if value is absolute
-        // Assuming effect.value is relative for now as per example "Sudden Gust of Wind"
-        // If it can be absolute, logic needs to distinguish: e.g. if (selectedCard.effect.isAbsolute) newPos = val
-        currentPlayer.position = (currentPlayer.position + selectedCard.effect.value) % board.length;
-      }
-      // Note: Effect of the new tile is not resolved in this turn.
-      break;
-    case "SKIP_TURN":
-      // players[currentPlayerIndex].skipNextTurn = true; // This would skip current player's next turn.
-      // The instruction implies the *next* player in sequence after current player finishes their turn.
-      // So this flag should be set on the player who would play next.
-      // However, the current design has SKIP_TURN make the *current* player skip their *next* turn.
-      // Let's stick to the spirit of making *someone* skip a turn.
-      // The provided logic snippet for SKIP_TURN handling is at the end of function,
-      // which correctly applies to the *next* player.
-      // So, we mark the current player to have an effect that says "the next turn progression will skip one player"
-      // For now, let's assume `players[currentPlayerIndex].effects` could store this.
-      // Or, as per instructions, a temporary field on game.
-      // The provided snippet sets `players[nextPlayerIndex].skipNextTurn = true;`
-      // This is deferred to the end of the function.
-      // For now, we'll just record the event happened.
-      // The actual skip logic is handled during turn progression.
-      await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true }); // Placeholder for effect
-      break;
-    case "EXTRA_ROLL":
-      players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
-      await gameRef.update({
-        players: players,
-        lastEventCard: { title: selectedCard.title, description: selectedCard.description },
-        // currentPlayerId remains the same
-        turnState: "AWAITING_ROLL", // Player rolls again
-      });
-      return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
+      case "GIVE_MANA":
+        currentPlayer.mana += selectedCard.effect.value;
+        if (currentPlayer.mana < 0) currentPlayer.mana = 0;
+        // if (currentPlayer.mana > MAX_MANA) currentPlayer.mana = MAX_MANA;
+        break;
+      case "MOVE_TO_TILE":
+        // const boardSize = board.length;
+        if (selectedCard.effect.value < 0) { // Moving backwards relative to current position
+          currentPlayer.position = Math.max(0, currentPlayer.position + selectedCard.effect.value);
+        } else { // Moving forwards relative to current position or to a specific tile if value is absolute
+          // Assuming effect.value is relative for now as per example "Sudden Gust of Wind"
+          // If it can be absolute, logic needs to distinguish: e.g. if (selectedCard.effect.isAbsolute) newPos = val
+          currentPlayer.position = (currentPlayer.position + selectedCard.effect.value) % board.length;
+        }
+        // Note: Effect of the new tile is not resolved in this turn.
+        break;
+      case "SKIP_TURN":
+        // players[currentPlayerIndex].skipNextTurn = true; // This would skip current player's next turn.
+        // The instruction implies the *next* player in sequence after current player finishes their turn.
+        // So this flag should be set on the player who would play next.
+        // However, the current design has SKIP_TURN make the *current* player skip their *next* turn.
+        // Let's stick to the spirit of making *someone* skip a turn.
+        // The provided logic snippet for SKIP_TURN handling is at the end of function,
+        // which correctly applies to the *next* player.
+        // So, we mark the current player to have an effect that says "the next turn progression will skip one player"
+        // For now, let's assume `players[currentPlayerIndex].effects` could store this.
+        // Or, as per instructions, a temporary field on game.
+        // The provided snippet sets `players[nextPlayerIndex].skipNextTurn = true;`
+        // This is deferred to the end of the function.
+        // For now, we'll just record the event happened.
+        // The actual skip logic is handled during turn progression.
+        await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true }); // Placeholder for effect
+        break;
+      case "EXTRA_ROLL":
+        players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
+        await gameRef.update({
+          players: players,
+          lastEventCard: { title: selectedCard.title, description: selectedCard.description },
+          // currentPlayerId remains the same
+          turnState: "AWAITING_ROLL", // Player rolls again
+        });
+        return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
     }
 
     players[currentPlayerIndex] = currentPlayer;
@@ -1100,26 +1127,26 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 
   if (!tileEffectApplied) {
     switch (tile.type) {
-    case "MANA_GAIN":
-      currentPlayer.mana += 10;
-      players[currentPlayerIndex] = currentPlayer;
-      break;
-    case "MINI_GAME_QUIZ": // New case
-      logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
-      currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
-      // Optional: Cap mana if a manaMax is defined for the player in-game object
-      // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
-      players[currentPlayerIndex] = currentPlayer;
-      tileEffectApplied = true; // Mark that an effect was applied for this tile
-      // Add a log or event for the client if needed
-      await gameRef.update({
-        players: players, // Update players array with new mana value
-        log: FieldValue.arrayUnion({
-          message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
-          timestamp: FieldValue.serverTimestamp(),
-        }),
-      });
-      break;
+      case "MANA_GAIN":
+        currentPlayer.mana += 10;
+        players[currentPlayerIndex] = currentPlayer;
+        break;
+      case "MINI_GAME_QUIZ": // New case
+        logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
+        currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
+        // Optional: Cap mana if a manaMax is defined for the player in-game object
+        // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
+        players[currentPlayerIndex] = currentPlayer;
+        tileEffectApplied = true; // Mark that an effect was applied for this tile
+        // Add a log or event for the client if needed
+        await gameRef.update({
+          players: players, // Update players array with new mana value
+          log: FieldValue.arrayUnion({
+            message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
+            timestamp: FieldValue.serverTimestamp(),
+          }),
+        });
+        break;
       // TODO: Add case for HANGEUL_TYPHOON if it's a separate tile type
       // case "HANGEUL_TYPHOON":
       //   currentPlayer.mana += MANA_REWARD_HANGEUL_TYPHOON; // Placeholder for future use
@@ -1477,7 +1504,6 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
 
-
   const players = [...gameData.players];
   if (players[casterIndex].mana < spell.manaCost) {
     throw new HttpsError("failed-precondition", "Mana insuffisant.");
@@ -1504,55 +1530,55 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
   switch (spell.id) {
-  case "BLESSING_OF_HANGEUL": {
-    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
-    players[targetIndex].mana += 10; // Changed from 5 to 10
-    break;
-  }
-  case "KIMCHIS_MALICE": {
-    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
-    players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
-    break;
-  }
-  case "RUNE_TRAP": {
-    if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
-      throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
+    case "BLESSING_OF_HANGEUL": {
+      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
+      players[targetIndex].mana += 10; // Changed from 5 to 10
+      break;
     }
-    const boardCopy = [...gameData.board];
-    boardCopy[options.tileIndex] = { ...boardCopy[options.tileIndex], trap: { ownerId: uid, spellId: spell.id } }; // Added spellId to trap
-    await gameRef.update({
-      players: players,
-      board: boardCopy,
-      lastSpellCast: { spellId, casterId: uid, options },
-    });
-    // Note: spellsCast was already incremented before the switch.
-    return { success: true }; // Return early as board update is specific
-  }
-  case "MANA_SHIELD": {
-    // Target is self, casterIndex is used.
-    const existingEffects = players[casterIndex].effects || [];
-    const hasShield = existingEffects.some((effect: {type: string}) => effect.type === "SHIELDED");
-    if (!hasShield) {
-      players[casterIndex].effects = [...existingEffects, { type: "SHIELDED", duration: 1, spellId: spell.id }]; // Duration changed to 1
-    } else {
-      players[casterIndex].effects = existingEffects.map((effect: {type: string, duration: number}) =>
-        effect.type === "SHIELDED" ? { ...effect, duration: 1 } : effect // Duration changed to 1
-      );
+    case "KIMCHIS_MALICE": {
+      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
+      players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
+      break;
     }
-    break;
-  }
-  case "ASTRAL_SWAP": {
-    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
-    if (uid === targetId) { // Should be caught by earlier general check but good to have specific
-      throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
+    case "RUNE_TRAP": {
+      if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
+        throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
+      }
+      const boardCopy = [...gameData.board];
+      boardCopy[options.tileIndex] = { ...boardCopy[options.tileIndex], trap: { ownerId: uid, spellId: spell.id } }; // Added spellId to trap
+      await gameRef.update({
+        players: players,
+        board: boardCopy,
+        lastSpellCast: { spellId, casterId: uid, options },
+      });
+      // Note: spellsCast was already incremented before the switch.
+      return { success: true }; // Return early as board update is specific
     }
-    // player1Index is casterIndex
-    const pos1 = players[casterIndex].position;
-    const pos2 = players[targetIndex].position;
-    players[casterIndex].position = pos2;
-    players[targetIndex].position = pos1;
-    break;
-  }
+    case "MANA_SHIELD": {
+      // Target is self, casterIndex is used.
+      const existingEffects = players[casterIndex].effects || [];
+      const hasShield = existingEffects.some((effect: { type: string }) => effect.type === "SHIELDED");
+      if (!hasShield) {
+        players[casterIndex].effects = [...existingEffects, { type: "SHIELDED", duration: 1, spellId: spell.id }]; // Duration changed to 1
+      } else {
+        players[casterIndex].effects = existingEffects.map((effect: { type: string, duration: number }) =>
+          effect.type === "SHIELDED" ? { ...effect, duration: 1 } : effect // Duration changed to 1
+        );
+      }
+      break;
+    }
+    case "ASTRAL_SWAP": {
+      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
+      if (uid === targetId) { // Should be caught by earlier general check but good to have specific
+        throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
+      }
+      // player1Index is casterIndex
+      const pos1 = players[casterIndex].position;
+      const pos2 = players[targetIndex].position;
+      players[casterIndex].position = pos2;
+      players[targetIndex].position = pos1;
+      break;
+    }
   }
 
   await gameRef.update({
