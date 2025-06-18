@@ -63,8 +63,8 @@ export interface Game {
   status: "waiting" | "playing" | "finished";
   players: Player[];
   currentPlayerId?: string;
-  turnState?: "AWAITING_ROLL" | "RESOLVING_TILE" | "ENDED"; // Added "ENDED" state
-  lastDiceRoll?: number;
+  turnState?: "AWAITING_ROLL" | "MOVING" | "RESOLVING_TILE" | "ENDED";
+  lastDiceRoll?: number | null;
   board?: Tile[]; // AJOUT : Le plateau de jeu de la session
   grimoirePositions?: number[]; // Positions des grimoires sur le plateau
   winnerId?: string; // Pour stocker le gagnant à la fin
