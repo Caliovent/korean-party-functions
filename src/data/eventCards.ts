@@ -1,54 +1,71 @@
 export interface EventCard {
-  id: string;
-  title: string;
-  description: string;
-  effect: {
-    type: "GIVE_MANA" | "MOVE_TO_TILE" | "SKIP_TURN" | "EXTRA_ROLL";
-    value: number; // ex: 50 for GIVE_MANA, index de case pour MOVE_TO_TILE
+  id: string; // Keep for local array key, will be document ID in Firestore
+  titleKey: string;
+  descriptionKey: string;
+  GfxUrl: string;
+  type: "BONUS_MANA" | "MALUS_MANA" | "QUIZ_CULTUREL" | "MOVE_RELATIVE" | "EXTRA_ROLL" | "SKIP_TURN_SELF";
+  effectDetails: {
+    manaAmount?: number; // For BONUS_MANA, MALUS_MANA
+    moveAmount?: number; // For MOVE_RELATIVE
+    quizId?: string; // For QUIZ_CULTUREL (future use)
+    // EXTRA_ROLL and SKIP_TURN_SELF might not need details if their type is sufficient
   };
+  rarity: "common" | "rare" | "epic";
 }
 
 export const eventCards: EventCard[] = [
   {
-    id: "EVENT_001",
-    title: "Mana Surge",
-    description: "A surge of mana flows through you!",
-    effect: { type: "GIVE_MANA", value: 35 },
+    id: "EVT001",
+    titleKey: "event.mana_windfall.title",
+    descriptionKey: "event.mana_windfall.desc",
+    GfxUrl: "https://example.com/gfx/mana_windfall.png", // Placeholder GfxUrl
+    type: "BONUS_MANA",
+    effectDetails: { manaAmount: 20 },
+    rarity: "common",
   },
   {
-    id: "EVENT_002",
-    title: "Unexpected Shortcut",
-    description: "You discover an unexpected shortcut on the board.",
-    effect: { type: "MOVE_TO_TILE", value: 15 }, // Assuming tile 15 is a beneficial location
+    id: "EVT002",
+    titleKey: "event.mana_drain.title",
+    descriptionKey: "event.mana_drain.desc",
+    GfxUrl: "https://example.com/gfx/mana_drain.png", // Placeholder GfxUrl
+    type: "MALUS_MANA",
+    effectDetails: { manaAmount: -10 }, // Represents losing 10 mana
+    rarity: "common",
   },
   {
-    id: "EVENT_003",
-    title: "Momentary Stumble",
-    description: "You stumble and lose your next turn.",
-    effect: { type: "SKIP_TURN", value: 1 }, // Value could represent number of turns to skip
+    id: "EVT003",
+    titleKey: "event.cultural_quiz.title",
+    descriptionKey: "event.cultural_quiz.desc",
+    GfxUrl: "https://example.com/gfx/cultural_quiz.png", // Placeholder GfxUrl
+    type: "QUIZ_CULTUREL",
+    effectDetails: { quizId: "CQ001" }, // No mechanical effect for now
+    rarity: "common",
   },
   {
-    id: "EVENT_004",
-    title: "Lucky Break",
-    description: "You get a lucky break and roll again!",
-    effect: { type: "EXTRA_ROLL", value: 1 }, // Value could represent number of extra rolls
+    id: "EVT004",
+    titleKey: "event.lucky_break.title",
+    descriptionKey: "event.lucky_break.desc",
+    GfxUrl: "https://example.com/gfx/lucky_break.png", // Placeholder GfxUrl
+    type: "EXTRA_ROLL",
+    effectDetails: {},
+    rarity: "rare",
   },
   {
-    id: "EVENT_005",
-    title: "Mana Drain",
-    description: "An arcane anomaly drains some of your mana.",
-    effect: { type: "GIVE_MANA", value: -25 }, // Negative value for losing mana
+    id: "EVT005",
+    titleKey: "event.sudden_gust.title",
+    descriptionKey: "event.sudden_gust.desc",
+    GfxUrl: "https://example.com/gfx/sudden_gust.png", // Placeholder GfxUrl
+    type: "MOVE_RELATIVE",
+    effectDetails: { moveAmount: -3 }, // Move back 3 spaces
+    rarity: "common",
   },
   {
-    id: "EVENT_006",
-    title: "Mysterious Portal",
-    description: "A mysterious portal transports you to a new location.",
-    effect: { type: "MOVE_TO_TILE", value: 5 }, // Assuming tile 5
-  },
-  {
-    id: "EVENT_007",
-    title: "Sudden Gust of Wind",
-    description: "A sudden gust of wind pushes you back a few spaces.",
-    effect: { type: "MOVE_TO_TILE", value: -3 }, // Negative value for moving backwards
+    id: "EVT006",
+    titleKey: "event.skip_turn.title",
+    descriptionKey: "event.skip_turn.desc",
+    GfxUrl: "https://example.com/gfx/skip_turn.png", // Placeholder GfxUrl
+    type: "SKIP_TURN_SELF", // Current player skips their own next turn
+    effectDetails: {},
+    rarity: "common",
   },
 ];

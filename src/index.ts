@@ -1138,61 +1138,85 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
   }
 
-  if (tile.type === "event" && !tileEffectApplied) { // Only process event if trap hasn't superseded
+  // Standard tile type for events is usually "EVENT" as per documentation, using "event" as per existing code.
+  // If "EVENT" is the correct type, this condition string needs to be changed.
+  if (tile.type === "EVENT" && !tileEffectApplied) { // Changed "event" to "EVENT" based on mission brief
     tileEffectApplied = true; // Event itself is an effect
     const randomIndex = Math.floor(Math.random() * eventCards.length);
-    const selectedCard = eventCards[randomIndex] as EventCard; // Ensure type
+    // The `eventCards` import from `./data/eventCards` will now use the new EventCard interface.
+    const selectedCard = eventCards[randomIndex]; // No need for 'as EventCard' if types are aligned.
 
-    switch (selectedCard.effect.type) {
-      case "GIVE_MANA":
-        currentPlayer.mana += selectedCard.effect.value;
-        if (currentPlayer.mana < 0) currentPlayer.mana = 0;
-        // if (currentPlayer.mana > MAX_MANA) currentPlayer.mana = MAX_MANA;
-        break;
-      case "MOVE_TO_TILE":
-        // const boardSize = board.length;
-        if (selectedCard.effect.value < 0) { // Moving backwards relative to current position
-          currentPlayer.position = Math.max(0, currentPlayer.position + selectedCard.effect.value);
-        } else { // Moving forwards relative to current position or to a specific tile if value is absolute
-          // Assuming effect.value is relative for now as per example "Sudden Gust of Wind"
-          // If it can be absolute, logic needs to distinguish: e.g. if (selectedCard.effect.isAbsolute) newPos = val
-          currentPlayer.position = (currentPlayer.position + selectedCard.effect.value) % board.length;
+    // Prepare the data for lastEventCard field in Firestore
+    const eventCardDataForFirestore = {
+      titleKey: selectedCard.titleKey,
+      descriptionKey: selectedCard.descriptionKey,
+      GfxUrl: selectedCard.GfxUrl,
+      // Optional: include type and effectDetails if frontend needs them directly,
+      // but mission only specified titleKey, descriptionKey, GfxUrl for lastEventCard.
+    };
+
+    // Apply effects based on the new card structure
+    switch (selectedCard.type) {
+      case "BONUS_MANA":
+        if (selectedCard.effectDetails.manaAmount !== undefined) {
+          currentPlayer.mana += selectedCard.effectDetails.manaAmount;
         }
-        // Note: Effect of the new tile is not resolved in this turn.
         break;
-      case "SKIP_TURN":
-        // players[currentPlayerIndex].skipNextTurn = true; // This would skip current player's next turn.
-        // The instruction implies the *next* player in sequence after current player finishes their turn.
-        // So this flag should be set on the player who would play next.
-        // However, the current design has SKIP_TURN make the *current* player skip their *next* turn.
-        // Let's stick to the spirit of making *someone* skip a turn.
-        // The provided logic snippet for SKIP_TURN handling is at the end of function,
-        // which correctly applies to the *next* player.
-        // So, we mark the current player to have an effect that says "the next turn progression will skip one player"
-        // For now, let's assume `players[currentPlayerIndex].effects` could store this.
-        // Or, as per instructions, a temporary field on game.
-        // The provided snippet sets `players[nextPlayerIndex].skipNextTurn = true;`
-        // This is deferred to the end of the function.
-        // For now, we'll just record the event happened.
-        // The actual skip logic is handled during turn progression.
-        await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true }); // Placeholder for effect
+      case "MALUS_MANA": // Handles mana loss for the current player
+        if (selectedCard.effectDetails.manaAmount !== undefined) {
+          currentPlayer.mana += selectedCard.effectDetails.manaAmount; // manaAmount is negative for loss
+          if (currentPlayer.mana < 0) currentPlayer.mana = 0; // Ensure mana doesn't go below 0
+        }
+        break;
+      case "MOVE_RELATIVE":
+        if (selectedCard.effectDetails.moveAmount !== undefined) {
+          const moveAmount = selectedCard.effectDetails.moveAmount;
+          if (moveAmount < 0) {
+            currentPlayer.position = Math.max(0, currentPlayer.position + moveAmount);
+          } else {
+            currentPlayer.position = (currentPlayer.position + moveAmount) % board.length;
+          }
+          // Note: Effect of the new tile is not resolved in this turn.
+        }
+        break;
+      case "SKIP_TURN_SELF":
+        // This effect means the current player skips their *own* next turn.
+        // The existing skip logic at the end of resolveTileAction handles a player
+        // starting their turn with a `skipNextTurn` flag. So, we set that flag here.
+        // Ensure the player object structure can hold this, e.g., `effects.skipNextTurn` or a direct `skipNextTurn` boolean.
+        // The existing function uses `player.skipNextTurn`.
+        players[currentPlayerIndex].skipNextTurn = true;
+        logger.info(`Player ${currentPlayer.displayName} affected by ${selectedCard.titleKey}, will skip their next turn.`);
         break;
       case "EXTRA_ROLL":
         players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
         await gameRef.update({
           players: players,
-          lastEventCard: { title: selectedCard.title, description: selectedCard.description },
+          lastEventCard: eventCardDataForFirestore, // Update with new structure
           // currentPlayerId remains the same
           turnState: "AWAITING_ROLL", // Player rolls again
         });
+        // Return structure for EXTRA_ROLL might need adjustment if frontend expects specific "event" details.
+        // For now, returning the selectedCard which is compliant with the new structure.
         return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
+      case "QUIZ_CULTUREL":
+        // No mechanical game effect for now, just display the card.
+        // The card display is handled by setting lastEventCard.
+        logger.info(`Player ${currentPlayer.displayName} drew a cultural quiz card: ${selectedCard.titleKey}`);
+        break;
     }
 
-    players[currentPlayerIndex] = currentPlayer;
+    players[currentPlayerIndex] = currentPlayer; // Ensure current player's state is updated in the local array
     await gameRef.update({
-      lastEventCard: { title: selectedCard.title, description: selectedCard.description },
-      players: players,
+      lastEventCard: eventCardDataForFirestore, // Update with new structure
+      players: players, // Save updated players array (mana changes, position changes, skipNextTurn flag)
+      // board: board, // Already part of the final update if other changes like traps occurred
+      // grimoirePositions: grimoirePositions, // Also part of final update
     });
+    // Note: The final gameRef.update at the end of resolveTileAction will consolidate all changes.
+    // This specific update for lastEventCard ensures it's set before any potential early return or further logic.
+    // However, to maintain atomicity, it's often better to consolidate updates.
+    // For now, this explicit update after event processing is fine.
   }
 
   if (!tileEffectApplied) {
