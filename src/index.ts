@@ -20,6 +20,9 @@ const MANA_REWARD_MINI_GAME_QUIZ = 20;
 const DEFAULT_GROUND_RISE_AMOUNT = 10;
 const DEFAULT_PENALTY_RISE_AMOUNT = 5;
 
+// Guild Constants
+const MAX_GUILD_MEMBERS = 50; // Maximum members allowed in a guild
+
 // Helper pour générer un plateau de jeu par défaut
 const generateBoardLayout = (): Tile[] => {
   const layout: Tile[] = [];
@@ -164,12 +167,18 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
   const uid = request.auth.uid;
 
   // 2. Validate input
-  const { name, tag } = request.data;
+  const { name, tag, description, emblem } = request.data; // Added description and emblem
   if (typeof name !== "string" || name.length < 3 || name.length > 30) {
     throw new HttpsError("invalid-argument", "Le nom de la guilde doit contenir entre 3 et 30 caractères.");
   }
   if (typeof tag !== "string" || tag.length < 2 || tag.length > 5) {
     throw new HttpsError("invalid-argument", "Le tag de la guilde doit contenir entre 2 et 5 caractères.");
+  }
+  if (typeof description !== "string" || description.length < 10 || description.length > 200) { // Added validation
+    throw new HttpsError("invalid-argument", "La description de la guilde doit contenir entre 10 et 200 caractères.");
+  }
+  if (typeof emblem !== "string" || emblem.trim() === "") { // Added validation (e.g., ensuring it's a non-empty string if it's an ID/URL)
+    throw new HttpsError("invalid-argument", "Un emblème valide est requis.");
   }
 
   const userRef = db.collection("users").doc(uid);
@@ -204,19 +213,30 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
 
       // 5. Create the new guild
       const newGuildRef = guildsRef.doc(); // Auto-generate ID
-      const initialMember: GuildMember = { uid, displayName };
       const newGuildData: Guild = {
         id: newGuildRef.id,
         name,
         tag,
-        leaderId: uid,
-        members: [initialMember],
-        createdAt: admin.firestore.Timestamp.now(), // Use admin.firestore.Timestamp
+        description, // Added
+        emblem, // Added
+        leaderId: uid, // masterId equivalent
+        members: { // Changed to map with roles and joinedAt
+          [uid]: {
+            role: "master",
+            displayName: displayName, // displayName of the creator
+            joinedAt: admin.firestore.Timestamp.now(), // Timestamp of guild creation for the master
+          },
+        },
+        memberCount: 1, // Added
+        createdAt: admin.firestore.Timestamp.now(),
       };
       transaction.set(newGuildRef, newGuildData);
 
-      // 6. Update user's profile with guildId
-      transaction.update(userRef, { guildId: newGuildRef.id });
+      // 6. Update user's profile with guildId and role
+      transaction.update(userRef, {
+        guildId: newGuildRef.id,
+        guildRole: "master", // Added guildRole
+      });
 
       return { guildId: newGuildRef.id, message: "Guilde créée avec succès !" };
     });
@@ -226,6 +246,70 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
       throw error;
     }
     throw new HttpsError("internal", "Une erreur interne est survenue lors de la création de la guilde.");
+  }
+});
+
+export const listGuilds = onCall({ cors: true }, async (request) => {
+  // No auth check needed for listing public guilds, unless specified otherwise.
+  // For now, assuming public listing.
+
+  const { limit: reqLimit, startAfterDocId } = request.data || {};
+
+  const DEFAULT_LIMIT = 10;
+  const MAX_LIMIT = 25;
+
+  let limit = typeof reqLimit === "number" && reqLimit > 0 ? Math.min(reqLimit, MAX_LIMIT) : DEFAULT_LIMIT;
+
+  let query = db.collection("guilds")
+    .orderBy("name") // Order by name for consistent pagination
+    .limit(limit);
+
+  if (startAfterDocId && typeof startAfterDocId === "string") {
+    try {
+      const startAfterDoc = await db.collection("guilds").doc(startAfterDocId).get();
+      if (startAfterDoc.exists) {
+        query = query.startAfter(startAfterDoc);
+      } else {
+        logger.warn(`listGuilds: startAfterDocId ${startAfterDocId} not found.`);
+        // Proceed without startAfter, effectively starting from the beginning for this query.
+      }
+    } catch (error) {
+      logger.error(`listGuilds: Error fetching startAfterDocId ${startAfterDocId}:`, error);
+      // Proceed without startAfter on error.
+    }
+  }
+
+  try {
+    const snapshot = await query.get();
+    const guilds: any[] = []; // Use a more specific type if possible, e.g., Partial<Guild> or a dedicated ListGuildEntry
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      guilds.push({
+        id: doc.id,
+        name: data.name,
+        tag: data.tag,
+        description: data.description,
+        emblem: data.emblem,
+        memberCount: data.memberCount,
+        // Do not include the full 'members' map for public listing.
+      });
+    });
+
+    // Determine the ID of the last document for next page's startAfter
+    const lastDocInPage = snapshot.docs[snapshot.docs.length - 1];
+    const nextPageStartAfterDocId = lastDocInPage ? lastDocInPage.id : null;
+
+    return {
+      guilds,
+      nextPageStartAfterDocId, // Client can use this for the next request
+      hasMore: guilds.length === limit, // A simple way to suggest if there might be more
+    };
+  } catch (error) {
+    logger.error("Erreur lors de la récupération de la liste des guildes:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la récupération de la liste des guildes.");
   }
 });
 
@@ -263,26 +347,38 @@ export const joinGuild = onCall({ cors: true }, async (request: functions.https.
       if (!guildDoc.exists) {
         throw new HttpsError("not-found", `Guilde avec l'ID "${guildId}" non trouvée.`);
       }
-      const guildData = guildDoc.data() as Guild; // Cast to Guild type
+      const guildData = guildDoc.data() as Guild; // Cast to updated Guild type
 
-      // 5. Check if user is already a member (should be redundant due to user profile check, but good for integrity)
-      if (guildData.members.some((member) => member.uid === uid)) {
+      // 5. Check if guild is full
+      if (guildData.memberCount >= MAX_GUILD_MEMBERS) {
+        throw new HttpsError("failed-precondition", `La guilde "${guildData.name}" est pleine.`);
+      }
+
+      // 6. Check if user is already a member (using the new members map structure)
+      // This check is technically redundant due to userData.guildId check, but good for integrity.
+      if (guildData.members && guildData.members[uid]) {
         // This case should ideally not be reached if user profile guildId is managed correctly.
         // If reached, it implies an inconsistency. We can update user profile as a corrective measure.
-        transaction.update(userRef, { guildId: guildId });
+        transaction.update(userRef, { guildId: guildId, guildRole: guildData.members[uid].role || "member" });
         throw new HttpsError("failed-precondition", "Vous êtes déjà listé comme membre de cette guilde (profil mis à jour).");
       }
 
-      // (Future: Add member limit check here if implemented: e.g., if (guildData.members.length >= MAX_MEMBERS) ...)
-
-      // 6. Add user to guild's members array
-      const newMember: GuildMember = { uid, displayName };
+      // 7. Add user to guild's members map and increment memberCount
+      const memberDetail = { // Using GuildMemberDetail structure
+        role: "member",
+        displayName: displayName,
+        joinedAt: admin.firestore.Timestamp.now(),
+      };
       transaction.update(guildRef, {
-        members: FieldValue.arrayUnion(newMember), // Atomically add new member
+        [`members.${uid}`]: memberDetail, // Add new member to the map
+        memberCount: FieldValue.increment(1), // Atomically increment memberCount
       });
 
-      // 7. Update user's profile with guildId
-      transaction.update(userRef, { guildId: guildId });
+      // 8. Update user's profile with guildId and role
+      transaction.update(userRef, {
+        guildId: guildId,
+        guildRole: "member", // Set user's role in the guild
+      });
 
       return { message: `Vous avez rejoint la guilde "${guildData.name}" avec succès !` };
     });
@@ -328,42 +424,87 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
         throw new HttpsError("not-found", "La guilde que vous essayez de quitter n'existe plus. Votre profil a été mis à jour.");
       }
 
-      const guildData = guildDoc.data() as Guild;
-      const userAsMember = guildData.members.find((member) => member.uid === uid);
+      const guildData = guildDoc.data() as Guild; // Cast to updated Guild type
 
-      if (!userAsMember) {
-        // Data inconsistency: user has guildId, guild exists, but user not in members list. Clean up.
-        logger.warn(`Utilisateur ${uid} (guildId: ${currentGuildId}) non trouvé dans la liste des membres de la guilde ${guildData.name}. Nettoyage du profil.`);
-        transaction.update(userRef, { guildId: FieldValue.delete() });
+      // Check if user is actually in the members map (new structure)
+      if (!guildData.members || !guildData.members[uid]) {
+        // Data inconsistency: user has guildId, guild exists, but user not in members map. Clean up.
+        logger.warn(`Utilisateur ${uid} (guildId: ${currentGuildId}) non trouvé dans la map des membres de la guilde ${guildData.name}. Nettoyage du profil.`);
+        transaction.update(userRef, {
+          guildId: FieldValue.delete(),
+          guildRole: FieldValue.delete(), // Also remove role
+        });
         throw new HttpsError("internal", "Erreur interne : vous n'étiez pas listé dans les membres de la guilde. Votre profil a été mis à jour.");
       }
 
-      // 3. Remove user from guild's members array
-      transaction.update(guildRef, {
-        members: FieldValue.arrayRemove(userAsMember),
-      });
+      // Prepare updates for the guild document
+      const guildUpdates: { [key: string]: any } = {
+        [`members.${uid}`]: FieldValue.delete(), // Remove member from map
+        memberCount: FieldValue.increment(-1), // Decrement memberCount
+      };
 
-      // 4. Update user's profile
-      transaction.update(userRef, {
-        guildId: FieldValue.delete(), // Remove guildId field
-      });
-
-      // 5. Handle leader leaving scenarios
-      // let guildUpdateData: { [key: string]: any } = {}; // Not strictly needed due to direct transaction updates
       let finalMessage = `Vous avez quitté la guilde "${guildData.name}".`;
+      let newLeaderId: string | null = null;
+      let newLeaderProfileUpdate = null;
 
       if (guildData.leaderId === uid) {
-        const remainingMembers = guildData.members.filter((member) => member.uid !== uid);
-        if (remainingMembers.length === 0) {
-          // Leader leaves and is the last member, delete the guild
-          transaction.delete(guildRef);
+        // Leader is leaving
+        if (guildData.memberCount - 1 <= 0) { // Check if guild will be empty
+          transaction.delete(guildRef); // Delete the guild
           finalMessage = `Vous avez quitté la guilde "${guildData.name}" et étiez le dernier membre. La guilde a été dissoute.`;
         } else {
-          // Leader leaves, other members remain. Guild becomes leaderless for now.
-          transaction.update(guildRef, { leaderId: null });
-          finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. La guilde est maintenant sans leader.`;
-          logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. La guilde est maintenant sans leader désigné.`);
+          // Promote the oldest member (earliest joinedAt)
+          let oldestMemberUid: string | null = null;
+          let oldestJoinedAt: admin.firestore.Timestamp | null = null;
+
+          for (const memberUid in guildData.members) {
+            if (memberUid === uid) continue; // Skip the leaving leader
+
+            const memberDetail = guildData.members[memberUid];
+            if (!oldestJoinedAt || memberDetail.joinedAt.toMillis() < oldestJoinedAt.toMillis()) {
+              oldestJoinedAt = memberDetail.joinedAt;
+              oldestMemberUid = memberUid;
+            }
+          }
+
+          if (oldestMemberUid) {
+            newLeaderId = oldestMemberUid;
+            guildUpdates.leaderId = newLeaderId;
+            guildUpdates[`members.${newLeaderId}.role`] = "master"; // Promote new leader
+
+            // Prepare update for the new leader's user profile
+            const newLeaderUserRef = db.collection("users").doc(newLeaderId);
+            // This needs to be done carefully within transaction or after.
+            // For simplicity in transaction, we'll just update the guild doc here.
+            // User profile update for new leader might need to be outside or handled by client listening to guild changes.
+            // Let's try to include it in the transaction.
+            newLeaderProfileUpdate = { ref: newLeaderUserRef, data: { guildRole: "master" } };
+
+            finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. ${guildData.members[newLeaderId].displayName} a été promu(e) nouveau leader.`;
+            logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. ${newLeaderId} promu leader.`);
+          } else {
+            // Should not happen if memberCount > 0, but as a fallback:
+            logger.error(`Inconsistency: Leader ${uid} leaving guild ${currentGuildId} with supposedly remaining members, but no one found to promote.`);
+            guildUpdates.leaderId = null; // Guild becomes leaderless
+            finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. La guilde est maintenant sans leader (erreur de promotion).`;
+          }
         }
+      }
+
+      // Apply guild updates (member removal, count decrement, potential leader change)
+      if (guildData.memberCount -1 > 0 || (guildData.leaderId === uid && newLeaderId)) { // Only update if guild not deleted
+         transaction.update(guildRef, guildUpdates);
+      }
+
+      // Update the leaving user's profile
+      transaction.update(userRef, {
+        guildId: FieldValue.delete(),
+        guildRole: FieldValue.delete(),
+      });
+
+      // If a new leader was promoted, update their user profile
+      if (newLeaderProfileUpdate) {
+        transaction.update(newLeaderProfileUpdate.ref, newLeaderProfileUpdate.data);
       }
 
       return { message: finalMessage };

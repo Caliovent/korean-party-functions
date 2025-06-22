@@ -81,22 +81,44 @@ export interface Game {
     // id?: string; // if needed to reference back to eventCards data
   };
   createdAt: admin.firestore.Timestamp;
+  // Effects array for spells like Memory Fog, Mana Shield
+  effects?: Array<{
+    type: string;
+    duration: number;
+    spellId?: SpellId;
+    [key: string]: unknown;
+  }>;
+  skipNextTurn?: boolean;
+  // Fields for Hangeul Typhoon mini-game
+  groundHeight: number;
+  blocks: TyphoonBlock[];
+  // Guild related fields for the player object within a game context (if different from UserProfile)
+  // guildId?: string;
+  // guildTag?: string;
 }
 
-// Represents a member of a Guild
-export interface GuildMember {
-  uid: string;
+// Represents a member of a Guild within the Guild document
+export interface GuildMemberDetail {
+  role: string; // e.g., "master", "member", "officer"
   displayName: string;
+  joinedAt: admin.firestore.Timestamp;
+  // Potentially other stats specific to guild context later
 }
 
 // Represents a Guild
 export interface Guild {
-  id: string; // Document ID
+  id: string; // Document ID, should be same as the Firestore document ID
   name: string; // Guild name, unique
   tag: string; // Guild tag, unique, short (e.g., 3-5 chars)
-  leaderId: string; // UID of the player who is the leader
-  members: GuildMember[]; // Array of guild members
+  description: string; // Guild description
+  emblem: string; // URL or identifier for the guild emblem
+  leaderId: string; // UID of the player who is the leader (master)
+  members: Record<string, GuildMemberDetail>; // Map of UID to GuildMemberDetail
+  memberCount: number; // Current number of members in the guild
   createdAt: admin.firestore.Timestamp; // Server timestamp of creation
+  // Consider adding:
+  // maxMembers?: number;
+  // recruitmentPolicy?: "open" | "invite_only";
 }
 
 // It seems UserProfile is implicitly defined in src/index.ts's createProfileOnSignup.
