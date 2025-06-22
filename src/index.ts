@@ -20,6 +20,9 @@ const MANA_REWARD_MINI_GAME_QUIZ = 20;
 const DEFAULT_GROUND_RISE_AMOUNT = 10;
 const DEFAULT_PENALTY_RISE_AMOUNT = 5;
 
+// Guild Constants
+const MAX_GUILD_MEMBERS = 50; // Maximum members allowed in a guild
+
 // Helper pour générer un plateau de jeu par défaut
 const generateBoardLayout = (): Tile[] => {
   const layout: Tile[] = [];
@@ -164,12 +167,18 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
   const uid = request.auth.uid;
 
   // 2. Validate input
-  const { name, tag } = request.data;
+  const { name, tag, description, emblem } = request.data; // Added description and emblem
   if (typeof name !== "string" || name.length < 3 || name.length > 30) {
     throw new HttpsError("invalid-argument", "Le nom de la guilde doit contenir entre 3 et 30 caractères.");
   }
   if (typeof tag !== "string" || tag.length < 2 || tag.length > 5) {
     throw new HttpsError("invalid-argument", "Le tag de la guilde doit contenir entre 2 et 5 caractères.");
+  }
+  if (typeof description !== "string" || description.length < 10 || description.length > 200) { // Added validation
+    throw new HttpsError("invalid-argument", "La description de la guilde doit contenir entre 10 et 200 caractères.");
+  }
+  if (typeof emblem !== "string" || emblem.trim() === "") { // Added validation (e.g., ensuring it's a non-empty string if it's an ID/URL)
+    throw new HttpsError("invalid-argument", "Un emblème valide est requis.");
   }
 
   const userRef = db.collection("users").doc(uid);
@@ -204,19 +213,30 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
 
       // 5. Create the new guild
       const newGuildRef = guildsRef.doc(); // Auto-generate ID
-      const initialMember: GuildMember = { uid, displayName };
       const newGuildData: Guild = {
         id: newGuildRef.id,
         name,
         tag,
-        leaderId: uid,
-        members: [initialMember],
-        createdAt: admin.firestore.Timestamp.now(), // Use admin.firestore.Timestamp
+        description, // Added
+        emblem, // Added
+        leaderId: uid, // masterId equivalent
+        members: { // Changed to map with roles and joinedAt
+          [uid]: {
+            role: "master",
+            displayName: displayName, // displayName of the creator
+            joinedAt: admin.firestore.Timestamp.now(), // Timestamp of guild creation for the master
+          },
+        },
+        memberCount: 1, // Added
+        createdAt: admin.firestore.Timestamp.now(),
       };
       transaction.set(newGuildRef, newGuildData);
 
-      // 6. Update user's profile with guildId
-      transaction.update(userRef, { guildId: newGuildRef.id });
+      // 6. Update user's profile with guildId and role
+      transaction.update(userRef, {
+        guildId: newGuildRef.id,
+        guildRole: "master", // Added guildRole
+      });
 
       return { guildId: newGuildRef.id, message: "Guilde créée avec succès !" };
     });
@@ -226,6 +246,70 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
       throw error;
     }
     throw new HttpsError("internal", "Une erreur interne est survenue lors de la création de la guilde.");
+  }
+});
+
+export const listGuilds = onCall({ cors: true }, async (request) => {
+  // No auth check needed for listing public guilds, unless specified otherwise.
+  // For now, assuming public listing.
+
+  const { limit: reqLimit, startAfterDocId } = request.data || {};
+
+  const DEFAULT_LIMIT = 10;
+  const MAX_LIMIT = 25;
+
+  let limit = typeof reqLimit === "number" && reqLimit > 0 ? Math.min(reqLimit, MAX_LIMIT) : DEFAULT_LIMIT;
+
+  let query = db.collection("guilds")
+    .orderBy("name") // Order by name for consistent pagination
+    .limit(limit);
+
+  if (startAfterDocId && typeof startAfterDocId === "string") {
+    try {
+      const startAfterDoc = await db.collection("guilds").doc(startAfterDocId).get();
+      if (startAfterDoc.exists) {
+        query = query.startAfter(startAfterDoc);
+      } else {
+        logger.warn(`listGuilds: startAfterDocId ${startAfterDocId} not found.`);
+        // Proceed without startAfter, effectively starting from the beginning for this query.
+      }
+    } catch (error) {
+      logger.error(`listGuilds: Error fetching startAfterDocId ${startAfterDocId}:`, error);
+      // Proceed without startAfter on error.
+    }
+  }
+
+  try {
+    const snapshot = await query.get();
+    const guilds: any[] = []; // Use a more specific type if possible, e.g., Partial<Guild> or a dedicated ListGuildEntry
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      guilds.push({
+        id: doc.id,
+        name: data.name,
+        tag: data.tag,
+        description: data.description,
+        emblem: data.emblem,
+        memberCount: data.memberCount,
+        // Do not include the full 'members' map for public listing.
+      });
+    });
+
+    // Determine the ID of the last document for next page's startAfter
+    const lastDocInPage = snapshot.docs[snapshot.docs.length - 1];
+    const nextPageStartAfterDocId = lastDocInPage ? lastDocInPage.id : null;
+
+    return {
+      guilds,
+      nextPageStartAfterDocId, // Client can use this for the next request
+      hasMore: guilds.length === limit, // A simple way to suggest if there might be more
+    };
+  } catch (error) {
+    logger.error("Erreur lors de la récupération de la liste des guildes:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la récupération de la liste des guildes.");
   }
 });
 
@@ -263,26 +347,38 @@ export const joinGuild = onCall({ cors: true }, async (request: functions.https.
       if (!guildDoc.exists) {
         throw new HttpsError("not-found", `Guilde avec l'ID "${guildId}" non trouvée.`);
       }
-      const guildData = guildDoc.data() as Guild; // Cast to Guild type
+      const guildData = guildDoc.data() as Guild; // Cast to updated Guild type
 
-      // 5. Check if user is already a member (should be redundant due to user profile check, but good for integrity)
-      if (guildData.members.some((member) => member.uid === uid)) {
+      // 5. Check if guild is full
+      if (guildData.memberCount >= MAX_GUILD_MEMBERS) {
+        throw new HttpsError("failed-precondition", `La guilde "${guildData.name}" est pleine.`);
+      }
+
+      // 6. Check if user is already a member (using the new members map structure)
+      // This check is technically redundant due to userData.guildId check, but good for integrity.
+      if (guildData.members && guildData.members[uid]) {
         // This case should ideally not be reached if user profile guildId is managed correctly.
         // If reached, it implies an inconsistency. We can update user profile as a corrective measure.
-        transaction.update(userRef, { guildId: guildId });
+        transaction.update(userRef, { guildId: guildId, guildRole: guildData.members[uid].role || "member" });
         throw new HttpsError("failed-precondition", "Vous êtes déjà listé comme membre de cette guilde (profil mis à jour).");
       }
 
-      // (Future: Add member limit check here if implemented: e.g., if (guildData.members.length >= MAX_MEMBERS) ...)
-
-      // 6. Add user to guild's members array
-      const newMember: GuildMember = { uid, displayName };
+      // 7. Add user to guild's members map and increment memberCount
+      const memberDetail = { // Using GuildMemberDetail structure
+        role: "member",
+        displayName: displayName,
+        joinedAt: admin.firestore.Timestamp.now(),
+      };
       transaction.update(guildRef, {
-        members: FieldValue.arrayUnion(newMember), // Atomically add new member
+        [`members.${uid}`]: memberDetail, // Add new member to the map
+        memberCount: FieldValue.increment(1), // Atomically increment memberCount
       });
 
-      // 7. Update user's profile with guildId
-      transaction.update(userRef, { guildId: guildId });
+      // 8. Update user's profile with guildId and role
+      transaction.update(userRef, {
+        guildId: guildId,
+        guildRole: "member", // Set user's role in the guild
+      });
 
       return { message: `Vous avez rejoint la guilde "${guildData.name}" avec succès !` };
     });
@@ -328,42 +424,87 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
         throw new HttpsError("not-found", "La guilde que vous essayez de quitter n'existe plus. Votre profil a été mis à jour.");
       }
 
-      const guildData = guildDoc.data() as Guild;
-      const userAsMember = guildData.members.find((member) => member.uid === uid);
+      const guildData = guildDoc.data() as Guild; // Cast to updated Guild type
 
-      if (!userAsMember) {
-        // Data inconsistency: user has guildId, guild exists, but user not in members list. Clean up.
-        logger.warn(`Utilisateur ${uid} (guildId: ${currentGuildId}) non trouvé dans la liste des membres de la guilde ${guildData.name}. Nettoyage du profil.`);
-        transaction.update(userRef, { guildId: FieldValue.delete() });
+      // Check if user is actually in the members map (new structure)
+      if (!guildData.members || !guildData.members[uid]) {
+        // Data inconsistency: user has guildId, guild exists, but user not in members map. Clean up.
+        logger.warn(`Utilisateur ${uid} (guildId: ${currentGuildId}) non trouvé dans la map des membres de la guilde ${guildData.name}. Nettoyage du profil.`);
+        transaction.update(userRef, {
+          guildId: FieldValue.delete(),
+          guildRole: FieldValue.delete(), // Also remove role
+        });
         throw new HttpsError("internal", "Erreur interne : vous n'étiez pas listé dans les membres de la guilde. Votre profil a été mis à jour.");
       }
 
-      // 3. Remove user from guild's members array
-      transaction.update(guildRef, {
-        members: FieldValue.arrayRemove(userAsMember),
-      });
+      // Prepare updates for the guild document
+      const guildUpdates: { [key: string]: any } = {
+        [`members.${uid}`]: FieldValue.delete(), // Remove member from map
+        memberCount: FieldValue.increment(-1), // Decrement memberCount
+      };
 
-      // 4. Update user's profile
-      transaction.update(userRef, {
-        guildId: FieldValue.delete(), // Remove guildId field
-      });
-
-      // 5. Handle leader leaving scenarios
-      // let guildUpdateData: { [key: string]: any } = {}; // Not strictly needed due to direct transaction updates
       let finalMessage = `Vous avez quitté la guilde "${guildData.name}".`;
+      let newLeaderId: string | null = null;
+      let newLeaderProfileUpdate = null;
 
       if (guildData.leaderId === uid) {
-        const remainingMembers = guildData.members.filter((member) => member.uid !== uid);
-        if (remainingMembers.length === 0) {
-          // Leader leaves and is the last member, delete the guild
-          transaction.delete(guildRef);
+        // Leader is leaving
+        if (guildData.memberCount - 1 <= 0) { // Check if guild will be empty
+          transaction.delete(guildRef); // Delete the guild
           finalMessage = `Vous avez quitté la guilde "${guildData.name}" et étiez le dernier membre. La guilde a été dissoute.`;
         } else {
-          // Leader leaves, other members remain. Guild becomes leaderless for now.
-          transaction.update(guildRef, { leaderId: null });
-          finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. La guilde est maintenant sans leader.`;
-          logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. La guilde est maintenant sans leader désigné.`);
+          // Promote the oldest member (earliest joinedAt)
+          let oldestMemberUid: string | null = null;
+          let oldestJoinedAt: admin.firestore.Timestamp | null = null;
+
+          for (const memberUid in guildData.members) {
+            if (memberUid === uid) continue; // Skip the leaving leader
+
+            const memberDetail = guildData.members[memberUid];
+            if (!oldestJoinedAt || memberDetail.joinedAt.toMillis() < oldestJoinedAt.toMillis()) {
+              oldestJoinedAt = memberDetail.joinedAt;
+              oldestMemberUid = memberUid;
+            }
+          }
+
+          if (oldestMemberUid) {
+            newLeaderId = oldestMemberUid;
+            guildUpdates.leaderId = newLeaderId;
+            guildUpdates[`members.${newLeaderId}.role`] = "master"; // Promote new leader
+
+            // Prepare update for the new leader's user profile
+            const newLeaderUserRef = db.collection("users").doc(newLeaderId);
+            // This needs to be done carefully within transaction or after.
+            // For simplicity in transaction, we'll just update the guild doc here.
+            // User profile update for new leader might need to be outside or handled by client listening to guild changes.
+            // Let's try to include it in the transaction.
+            newLeaderProfileUpdate = { ref: newLeaderUserRef, data: { guildRole: "master" } };
+
+            finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. ${guildData.members[newLeaderId].displayName} a été promu(e) nouveau leader.`;
+            logger.info(`Le leader ${uid} a quitté la guilde ${currentGuildId}. ${newLeaderId} promu leader.`);
+          } else {
+            // Should not happen if memberCount > 0, but as a fallback:
+            logger.error(`Inconsistency: Leader ${uid} leaving guild ${currentGuildId} with supposedly remaining members, but no one found to promote.`);
+            guildUpdates.leaderId = null; // Guild becomes leaderless
+            finalMessage = `Vous avez quitté la guilde "${guildData.name}" en tant que leader. La guilde est maintenant sans leader (erreur de promotion).`;
+          }
         }
+      }
+
+      // Apply guild updates (member removal, count decrement, potential leader change)
+      if (guildData.memberCount -1 > 0 || (guildData.leaderId === uid && newLeaderId)) { // Only update if guild not deleted
+         transaction.update(guildRef, guildUpdates);
+      }
+
+      // Update the leaving user's profile
+      transaction.update(userRef, {
+        guildId: FieldValue.delete(),
+        guildRole: FieldValue.delete(),
+      });
+
+      // If a new leader was promoted, update their user profile
+      if (newLeaderProfileUpdate) {
+        transaction.update(newLeaderProfileUpdate.ref, newLeaderProfileUpdate.data);
       }
 
       return { message: finalMessage };
@@ -1114,85 +1255,134 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 
   let tileEffectApplied = false;
 
-  // RUNE_TRAP Check
-  if (tile.trap && tile.trap.spellId === "RUNE_TRAP") {
-    logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${tile.trap.ownerId}`);
-    const manaLoss = 50;
-    currentPlayer.mana = Math.max(0, currentPlayer.mana - manaLoss);
-    players[currentPlayerIndex] = currentPlayer; // Update player in local array
+  // Trap Check (RUNE_TRAP, DOKKAEBI_MISCHIEF, etc.)
+  if (tile.trap && tile.trap.spellId) {
+    const trap = tile.trap; // Convenience variable
+    let trapTriggerMessage = "";
+    let manaLossFromTrap = 0;
 
-    // Log the event for the client
-    // Note: This specific update for the log might be batched or combined with the final update.
-    // For atomicity of trap removal and player state change due to trap, consider what needs to be updated together.
-    // The main update at the end will save players and board. Adding log here is fine.
-    await gameRef.update({
-      log: FieldValue.arrayUnion({
-        message: `${currentPlayer.displayName} triggered a Rune Trap and lost ${manaLoss} Mana! (Owned by ${tile.trap.ownerId})`,
-        timestamp: FieldValue.serverTimestamp(),
-      }),
-    });
+    switch (trap.spellId) {
+      case "RUNE_TRAP":
+        manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.RUNE_TRAP.effectDetails?.manaLoss || 50; // Fallback to hardcoded if not on trap object
+        logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
+        trapTriggerMessage = `${currentPlayer.displayName} triggered a Rune Trap (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
+        break;
+      case "DOKKAEBI_MISCHIEF":
+        manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.DOKKAEBI_MISCHIEF.effectDetails?.manaLoss || 15; // Fallback
+        logger.info(`Player ${currentPlayer.uid} triggered Dokkaebi's Mischief on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
+        trapTriggerMessage = `${currentPlayer.displayName} triggered Dokkaebi's Mischief (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
+        break;
+      default:
+        logger.warn(`Unknown trap spellId encountered: ${trap.spellId} on tile ${currentPlayer.position}`);
+        // Decide if unknown traps should still be removed or have a default effect. For now, it does nothing.
+        break;
+    }
 
-    // Remove the trap from the tile
-    delete board[currentPlayer.position].trap; // Modify the mutable board copy
+    if (manaLossFromTrap > 0) {
+      currentPlayer.mana = Math.max(0, currentPlayer.mana - manaLossFromTrap);
+      players[currentPlayerIndex] = currentPlayer; // Update player in local array
 
-    tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
+      // Log the event for the client
+      // This update can be batched with the final game state update if preferred,
+      // but for immediate feedback or distinct log entries, updating here is fine.
+      await gameRef.update({
+        log: FieldValue.arrayUnion({
+          message: trapTriggerMessage,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+        // It's important that players array is also part of this update if mana changed,
+        // or ensure the final update at the end of resolveTileAction saves it.
+        // For atomicity, it's better to group related state changes.
+        // However, the current structure has a final update. Let's ensure `players` is passed there.
+      });
+    }
+
+    if (trapTriggerMessage) { // If any known trap was triggered and handled
+        // Remove the trap from the tile
+        delete board[currentPlayer.position].trap; // Modify the mutable board copy
+        tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
+    }
   }
 
-  if (tile.type === "event" && !tileEffectApplied) { // Only process event if trap hasn't superseded
+  // Standard tile type for events is usually "EVENT" as per documentation, using "event" as per existing code.
+  // If "EVENT" is the correct type, this condition string needs to be changed.
+  if (tile.type === "EVENT" && !tileEffectApplied) { // Changed "event" to "EVENT" based on mission brief
     tileEffectApplied = true; // Event itself is an effect
     const randomIndex = Math.floor(Math.random() * eventCards.length);
-    const selectedCard = eventCards[randomIndex] as EventCard; // Ensure type
+    // The `eventCards` import from `./data/eventCards` will now use the new EventCard interface.
+    const selectedCard = eventCards[randomIndex]; // No need for 'as EventCard' if types are aligned.
 
-    switch (selectedCard.effect.type) {
-      case "GIVE_MANA":
-        currentPlayer.mana += selectedCard.effect.value;
-        if (currentPlayer.mana < 0) currentPlayer.mana = 0;
-        // if (currentPlayer.mana > MAX_MANA) currentPlayer.mana = MAX_MANA;
-        break;
-      case "MOVE_TO_TILE":
-        // const boardSize = board.length;
-        if (selectedCard.effect.value < 0) { // Moving backwards relative to current position
-          currentPlayer.position = Math.max(0, currentPlayer.position + selectedCard.effect.value);
-        } else { // Moving forwards relative to current position or to a specific tile if value is absolute
-          // Assuming effect.value is relative for now as per example "Sudden Gust of Wind"
-          // If it can be absolute, logic needs to distinguish: e.g. if (selectedCard.effect.isAbsolute) newPos = val
-          currentPlayer.position = (currentPlayer.position + selectedCard.effect.value) % board.length;
+    // Prepare the data for lastEventCard field in Firestore
+    const eventCardDataForFirestore = {
+      titleKey: selectedCard.titleKey,
+      descriptionKey: selectedCard.descriptionKey,
+      GfxUrl: selectedCard.GfxUrl,
+      // Optional: include type and effectDetails if frontend needs them directly,
+      // but mission only specified titleKey, descriptionKey, GfxUrl for lastEventCard.
+    };
+
+    // Apply effects based on the new card structure
+    switch (selectedCard.type) {
+      case "BONUS_MANA":
+        if (selectedCard.effectDetails.manaAmount !== undefined) {
+          currentPlayer.mana += selectedCard.effectDetails.manaAmount;
         }
-        // Note: Effect of the new tile is not resolved in this turn.
         break;
-      case "SKIP_TURN":
-        // players[currentPlayerIndex].skipNextTurn = true; // This would skip current player's next turn.
-        // The instruction implies the *next* player in sequence after current player finishes their turn.
-        // So this flag should be set on the player who would play next.
-        // However, the current design has SKIP_TURN make the *current* player skip their *next* turn.
-        // Let's stick to the spirit of making *someone* skip a turn.
-        // The provided logic snippet for SKIP_TURN handling is at the end of function,
-        // which correctly applies to the *next* player.
-        // So, we mark the current player to have an effect that says "the next turn progression will skip one player"
-        // For now, let's assume `players[currentPlayerIndex].effects` could store this.
-        // Or, as per instructions, a temporary field on game.
-        // The provided snippet sets `players[nextPlayerIndex].skipNextTurn = true;`
-        // This is deferred to the end of the function.
-        // For now, we'll just record the event happened.
-        // The actual skip logic is handled during turn progression.
-        await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true }); // Placeholder for effect
+      case "MALUS_MANA": // Handles mana loss for the current player
+        if (selectedCard.effectDetails.manaAmount !== undefined) {
+          currentPlayer.mana += selectedCard.effectDetails.manaAmount; // manaAmount is negative for loss
+          if (currentPlayer.mana < 0) currentPlayer.mana = 0; // Ensure mana doesn't go below 0
+        }
+        break;
+      case "MOVE_RELATIVE":
+        if (selectedCard.effectDetails.moveAmount !== undefined) {
+          const moveAmount = selectedCard.effectDetails.moveAmount;
+          if (moveAmount < 0) {
+            currentPlayer.position = Math.max(0, currentPlayer.position + moveAmount);
+          } else {
+            currentPlayer.position = (currentPlayer.position + moveAmount) % board.length;
+          }
+          // Note: Effect of the new tile is not resolved in this turn.
+        }
+        break;
+      case "SKIP_TURN_SELF":
+        // This effect means the current player skips their *own* next turn.
+        // The existing skip logic at the end of resolveTileAction handles a player
+        // starting their turn with a `skipNextTurn` flag. So, we set that flag here.
+        // Ensure the player object structure can hold this, e.g., `effects.skipNextTurn` or a direct `skipNextTurn` boolean.
+        // The existing function uses `player.skipNextTurn`.
+        players[currentPlayerIndex].skipNextTurn = true;
+        logger.info(`Player ${currentPlayer.displayName} affected by ${selectedCard.titleKey}, will skip their next turn.`);
         break;
       case "EXTRA_ROLL":
         players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
         await gameRef.update({
           players: players,
-          lastEventCard: { title: selectedCard.title, description: selectedCard.description },
+          lastEventCard: eventCardDataForFirestore, // Update with new structure
           // currentPlayerId remains the same
           turnState: "AWAITING_ROLL", // Player rolls again
         });
+        // Return structure for EXTRA_ROLL might need adjustment if frontend expects specific "event" details.
+        // For now, returning the selectedCard which is compliant with the new structure.
         return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
+      case "QUIZ_CULTUREL":
+        // No mechanical game effect for now, just display the card.
+        // The card display is handled by setting lastEventCard.
+        logger.info(`Player ${currentPlayer.displayName} drew a cultural quiz card: ${selectedCard.titleKey}`);
+        break;
     }
 
-    players[currentPlayerIndex] = currentPlayer;
+    players[currentPlayerIndex] = currentPlayer; // Ensure current player's state is updated in the local array
     await gameRef.update({
-      lastEventCard: { title: selectedCard.title, description: selectedCard.description },
-      players: players,
+      lastEventCard: eventCardDataForFirestore, // Update with new structure
+      players: players, // Save updated players array (mana changes, position changes, skipNextTurn flag)
+      // board: board, // Already part of the final update if other changes like traps occurred
+      // grimoirePositions: grimoirePositions, // Also part of final update
     });
+    // Note: The final gameRef.update at the end of resolveTileAction will consolidate all changes.
+    // This specific update for lastEventCard ensures it's set before any potential early return or further logic.
+    // However, to maintain atomicity, it's often better to consolidate updates.
+    // For now, this explicit update after event processing is fine.
   }
 
   if (!tileEffectApplied) {
@@ -1576,12 +1766,62 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
 
-  const players = [...gameData.players];
-  if (players[casterIndex].mana < spell.manaCost) {
+  const players = [...gameData.players]; // Make a mutable copy
+  const caster = { ...players[casterIndex] }; // Make a mutable copy of the caster
+
+  if (caster.mana < spell.manaCost) {
     throw new HttpsError("failed-precondition", "Mana insuffisant.");
   }
 
-  players[casterIndex].mana -= spell.manaCost;
+  // --- Spell Immunity Check (for offensive spells targeting another player) ---
+  // This check should happen BEFORE mana is deducted if the spell is blocked.
+  // Let's assume KIMCHIS_MALICE is the primary negative spell for now.
+  // Other spells might be added to this check if they are also considered "negative".
+  if (spell.id === "KIMCHIS_MALICE" && targetIndex !== -1 && targetIndex !== casterIndex) {
+    const targetPlayer = { ...players[targetIndex] }; // Mutable copy of target
+    const immunityEffectIndex = (targetPlayer.effects || []).findIndex(
+      (eff: any) => eff.type === "SHIELDED" || eff.type === "IMMUNE_TO_NEXT_SPELL"
+    );
+
+    if (immunityEffectIndex > -1) {
+      const immunityEffect = targetPlayer.effects[immunityEffectIndex];
+      logger.info(`Spell ${spell.id} blocked by ${immunityEffect.spellId} on player ${targetPlayer.uid}.`);
+
+      // Consume the immunity effect
+      targetPlayer.effects.splice(immunityEffectIndex, 1);
+      if (targetPlayer.effects.length === 0) {
+        delete targetPlayer.effects; // Clean up if no effects left
+      }
+      players[targetIndex] = targetPlayer; // Update target player in the main array
+
+      // Still deduct mana from caster for the attempt
+      caster.mana -= spell.manaCost;
+      players[casterIndex] = caster; // Update caster in the main array
+
+      // Increment spellsCast stat for the caster
+      const casterStatsRef = db.collection("users").doc(uid);
+      await casterStatsRef.update({
+        "stats.spellsCast": admin.firestore.FieldValue.increment(1),
+      }).catch((error) => {
+        logger.error(`Erreur lors de la mise à jour de stats.spellsCast pour ${uid} (spell blocked):`, error);
+      });
+      // No achievement check here as the core spell effect didn't land. Or maybe it should? For now, keeping it simple.
+
+      await gameRef.update({
+        players: players,
+        log: FieldValue.arrayUnion({ // Add a log message
+          message: `${caster.displayName} cast ${spell.name} on ${targetPlayer.displayName}, but it was blocked by ${immunityEffect.spellId}!`,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+        lastSpellCast: { spellId, casterId: uid, targetId: targetId, options, blocked: true },
+      });
+      return { success: true, effectBlocked: true, blockerSpellId: immunityEffect.spellId };
+    }
+  }
+  // --- End Spell Immunity Check ---
+
+  caster.mana -= spell.manaCost;
+  players[casterIndex] = caster; // Update caster's mana in the main array
 
   // Increment spellsCast stat for the caster
   const casterStatsRef = db.collection("users").doc(uid);
@@ -1641,21 +1881,86 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
     }
     case "ASTRAL_SWAP": {
       if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
-      if (uid === targetId) { // Should be caught by earlier general check but good to have specific
-        throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
-      }
-      // player1Index is casterIndex
-      const pos1 = players[casterIndex].position;
-      const pos2 = players[targetIndex].position;
-      players[casterIndex].position = pos2;
-      players[targetIndex].position = pos1;
+      // Validation uid === targetId is already done by general checks if spell.requiresTarget === 'player' and not self-targetable.
+      // const casterPlayer = players[casterIndex]; // Already have `caster`
+      const targetPlayer = players[targetIndex];
+
+      const casterPosition = players[casterIndex].position; // Use players[casterIndex] as `caster` is a copy for mana deduction.
+      const targetPosition = targetPlayer.position;
+
+      players[casterIndex].position = targetPosition;
+      players[targetIndex].position = casterPosition;
+      logger.info(`Astral Swap: ${players[casterIndex].displayName} (${casterPosition}) swapped with ${targetPlayer.displayName} (${targetPosition})`);
       break;
+    }
+    case "MEMORY_FOG": {
+      // Caster is players[casterIndex]
+      const currentCasterEffects = players[casterIndex].effects || [];
+      // Prevent stacking if already immune via MEMORY_FOG or MANA_SHIELD
+      const existingImmunity = currentCasterEffects.find(
+        (eff: any) => eff.type === "IMMUNE_TO_NEXT_SPELL" || eff.type === "SHIELDED"
+      );
+      if (!existingImmunity) {
+        players[casterIndex].effects = [
+          ...currentCasterEffects,
+          { type: "IMMUNE_TO_NEXT_SPELL", duration: 1, spellId: spell.id },
+        ];
+        logger.info(`Player ${players[casterIndex].displayName} cast Memory Fog.`);
+      } else {
+        // Optionally, refresh duration if re-cast? For now, no stacking if any immunity exists.
+        logger.info(`Player ${players[casterIndex].displayName} tried to cast Memory Fog but already has an immunity effect.`);
+        // Potentially throw an error or return a specific status if stacking isn't allowed and mana shouldn't be consumed.
+        // For now, mana is consumed, but effect is not re-applied if one exists.
+      }
+      break;
+    }
+    case "KARMIC_SWAP": {
+      if (targetIndex === -1 || targetIndex === casterIndex) { // Ensure target is valid and not self
+        throw new HttpsError("invalid-argument", "Valid target player required for Karmic Swap and cannot target self.");
+      }
+      const casterCurrentPosition = players[casterIndex].position;
+      const targetCurrentPosition = players[targetIndex].position;
+
+      players[casterIndex].position = targetCurrentPosition;
+      players[targetIndex].position = casterCurrentPosition;
+      logger.info(`Karmic Swap: ${players[casterIndex].displayName} (was at ${casterCurrentPosition}) swapped with ${players[targetIndex].displayName} (was at ${targetCurrentPosition})`);
+      break;
+    }
+    case "DOKKAEBI_MISCHIEF": {
+      if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
+        throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for Dokkaebi's Mischief.");
+      }
+      if (gameData.board[options.tileIndex].trap) {
+        throw new HttpsError("failed-precondition", "This tile already has a trap.");
+      }
+
+      const boardCopy = [...gameData.board];
+      boardCopy[options.tileIndex] = {
+        ...boardCopy[options.tileIndex],
+        trap: {
+          ownerId: uid,
+          spellId: spell.id,
+          effectType: "MANA_LOSS", // As per spell definition
+          manaAmount: spell.effectDetails?.manaLoss || 15, // Get from definition, fallback
+        },
+      };
+      logger.info(`Player ${players[casterIndex].displayName} placed Dokkaebi's Mischief on tile ${options.tileIndex}.`);
+      // Update board specifically for trap spells, then players and lastSpellCast in the final update
+      await gameRef.update({
+        board: boardCopy,
+        players: players, // Also save player mana update
+        lastSpellCast: { spellId, casterId: uid, targetId, options },
+      });
+      return { success: true, message: "Dokkaebi's Mischief placed." }; // Return early as board is updated
     }
   }
 
+  // Ensure players array reflects changes to caster from mana deduction and potential effects
+  // players[casterIndex] = caster; // This was done before the switch for mana, re-ensure for effects if caster object was modified directly.
+
   await gameRef.update({
-    players: players,
-    lastSpellCast: { spellId, casterId: uid, targetId: targetId, options }, // targetId might be null for RUNE_TRAP but handled above
+    players: players, // This will save caster's reduced mana, and any effects applied to caster/target positions
+    lastSpellCast: { spellId, casterId: uid, targetId: targetId, options, blocked: false }, // Ensure 'blocked' is part of the data
   });
   return { success: true };
 });
