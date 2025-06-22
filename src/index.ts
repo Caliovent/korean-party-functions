@@ -1114,28 +1114,53 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 
   let tileEffectApplied = false;
 
-  // RUNE_TRAP Check
-  if (tile.trap && tile.trap.spellId === "RUNE_TRAP") {
-    logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${tile.trap.ownerId}`);
-    const manaLoss = 50;
-    currentPlayer.mana = Math.max(0, currentPlayer.mana - manaLoss);
-    players[currentPlayerIndex] = currentPlayer; // Update player in local array
+  // Trap Check (RUNE_TRAP, DOKKAEBI_MISCHIEF, etc.)
+  if (tile.trap && tile.trap.spellId) {
+    const trap = tile.trap; // Convenience variable
+    let trapTriggerMessage = "";
+    let manaLossFromTrap = 0;
 
-    // Log the event for the client
-    // Note: This specific update for the log might be batched or combined with the final update.
-    // For atomicity of trap removal and player state change due to trap, consider what needs to be updated together.
-    // The main update at the end will save players and board. Adding log here is fine.
-    await gameRef.update({
-      log: FieldValue.arrayUnion({
-        message: `${currentPlayer.displayName} triggered a Rune Trap and lost ${manaLoss} Mana! (Owned by ${tile.trap.ownerId})`,
-        timestamp: FieldValue.serverTimestamp(),
-      }),
-    });
+    switch (trap.spellId) {
+      case "RUNE_TRAP":
+        manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.RUNE_TRAP.effectDetails?.manaLoss || 50; // Fallback to hardcoded if not on trap object
+        logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
+        trapTriggerMessage = `${currentPlayer.displayName} triggered a Rune Trap (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
+        break;
+      case "DOKKAEBI_MISCHIEF":
+        manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.DOKKAEBI_MISCHIEF.effectDetails?.manaLoss || 15; // Fallback
+        logger.info(`Player ${currentPlayer.uid} triggered Dokkaebi's Mischief on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
+        trapTriggerMessage = `${currentPlayer.displayName} triggered Dokkaebi's Mischief (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
+        break;
+      default:
+        logger.warn(`Unknown trap spellId encountered: ${trap.spellId} on tile ${currentPlayer.position}`);
+        // Decide if unknown traps should still be removed or have a default effect. For now, it does nothing.
+        break;
+    }
 
-    // Remove the trap from the tile
-    delete board[currentPlayer.position].trap; // Modify the mutable board copy
+    if (manaLossFromTrap > 0) {
+      currentPlayer.mana = Math.max(0, currentPlayer.mana - manaLossFromTrap);
+      players[currentPlayerIndex] = currentPlayer; // Update player in local array
 
-    tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
+      // Log the event for the client
+      // This update can be batched with the final game state update if preferred,
+      // but for immediate feedback or distinct log entries, updating here is fine.
+      await gameRef.update({
+        log: FieldValue.arrayUnion({
+          message: trapTriggerMessage,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+        // It's important that players array is also part of this update if mana changed,
+        // or ensure the final update at the end of resolveTileAction saves it.
+        // For atomicity, it's better to group related state changes.
+        // However, the current structure has a final update. Let's ensure `players` is passed there.
+      });
+    }
+
+    if (trapTriggerMessage) { // If any known trap was triggered and handled
+        // Remove the trap from the tile
+        delete board[currentPlayer.position].trap; // Modify the mutable board copy
+        tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
+    }
   }
 
   // Standard tile type for events is usually "EVENT" as per documentation, using "event" as per existing code.
@@ -1600,12 +1625,62 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
 
-  const players = [...gameData.players];
-  if (players[casterIndex].mana < spell.manaCost) {
+  const players = [...gameData.players]; // Make a mutable copy
+  const caster = { ...players[casterIndex] }; // Make a mutable copy of the caster
+
+  if (caster.mana < spell.manaCost) {
     throw new HttpsError("failed-precondition", "Mana insuffisant.");
   }
 
-  players[casterIndex].mana -= spell.manaCost;
+  // --- Spell Immunity Check (for offensive spells targeting another player) ---
+  // This check should happen BEFORE mana is deducted if the spell is blocked.
+  // Let's assume KIMCHIS_MALICE is the primary negative spell for now.
+  // Other spells might be added to this check if they are also considered "negative".
+  if (spell.id === "KIMCHIS_MALICE" && targetIndex !== -1 && targetIndex !== casterIndex) {
+    const targetPlayer = { ...players[targetIndex] }; // Mutable copy of target
+    const immunityEffectIndex = (targetPlayer.effects || []).findIndex(
+      (eff: any) => eff.type === "SHIELDED" || eff.type === "IMMUNE_TO_NEXT_SPELL"
+    );
+
+    if (immunityEffectIndex > -1) {
+      const immunityEffect = targetPlayer.effects[immunityEffectIndex];
+      logger.info(`Spell ${spell.id} blocked by ${immunityEffect.spellId} on player ${targetPlayer.uid}.`);
+
+      // Consume the immunity effect
+      targetPlayer.effects.splice(immunityEffectIndex, 1);
+      if (targetPlayer.effects.length === 0) {
+        delete targetPlayer.effects; // Clean up if no effects left
+      }
+      players[targetIndex] = targetPlayer; // Update target player in the main array
+
+      // Still deduct mana from caster for the attempt
+      caster.mana -= spell.manaCost;
+      players[casterIndex] = caster; // Update caster in the main array
+
+      // Increment spellsCast stat for the caster
+      const casterStatsRef = db.collection("users").doc(uid);
+      await casterStatsRef.update({
+        "stats.spellsCast": admin.firestore.FieldValue.increment(1),
+      }).catch((error) => {
+        logger.error(`Erreur lors de la mise à jour de stats.spellsCast pour ${uid} (spell blocked):`, error);
+      });
+      // No achievement check here as the core spell effect didn't land. Or maybe it should? For now, keeping it simple.
+
+      await gameRef.update({
+        players: players,
+        log: FieldValue.arrayUnion({ // Add a log message
+          message: `${caster.displayName} cast ${spell.name} on ${targetPlayer.displayName}, but it was blocked by ${immunityEffect.spellId}!`,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+        lastSpellCast: { spellId, casterId: uid, targetId: targetId, options, blocked: true },
+      });
+      return { success: true, effectBlocked: true, blockerSpellId: immunityEffect.spellId };
+    }
+  }
+  // --- End Spell Immunity Check ---
+
+  caster.mana -= spell.manaCost;
+  players[casterIndex] = caster; // Update caster's mana in the main array
 
   // Increment spellsCast stat for the caster
   const casterStatsRef = db.collection("users").doc(uid);
@@ -1665,21 +1740,86 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
     }
     case "ASTRAL_SWAP": {
       if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
-      if (uid === targetId) { // Should be caught by earlier general check but good to have specific
-        throw new HttpsError("invalid-argument", "Cannot swap with yourself.");
-      }
-      // player1Index is casterIndex
-      const pos1 = players[casterIndex].position;
-      const pos2 = players[targetIndex].position;
-      players[casterIndex].position = pos2;
-      players[targetIndex].position = pos1;
+      // Validation uid === targetId is already done by general checks if spell.requiresTarget === 'player' and not self-targetable.
+      // const casterPlayer = players[casterIndex]; // Already have `caster`
+      const targetPlayer = players[targetIndex];
+
+      const casterPosition = players[casterIndex].position; // Use players[casterIndex] as `caster` is a copy for mana deduction.
+      const targetPosition = targetPlayer.position;
+
+      players[casterIndex].position = targetPosition;
+      players[targetIndex].position = casterPosition;
+      logger.info(`Astral Swap: ${players[casterIndex].displayName} (${casterPosition}) swapped with ${targetPlayer.displayName} (${targetPosition})`);
       break;
+    }
+    case "MEMORY_FOG": {
+      // Caster is players[casterIndex]
+      const currentCasterEffects = players[casterIndex].effects || [];
+      // Prevent stacking if already immune via MEMORY_FOG or MANA_SHIELD
+      const existingImmunity = currentCasterEffects.find(
+        (eff: any) => eff.type === "IMMUNE_TO_NEXT_SPELL" || eff.type === "SHIELDED"
+      );
+      if (!existingImmunity) {
+        players[casterIndex].effects = [
+          ...currentCasterEffects,
+          { type: "IMMUNE_TO_NEXT_SPELL", duration: 1, spellId: spell.id },
+        ];
+        logger.info(`Player ${players[casterIndex].displayName} cast Memory Fog.`);
+      } else {
+        // Optionally, refresh duration if re-cast? For now, no stacking if any immunity exists.
+        logger.info(`Player ${players[casterIndex].displayName} tried to cast Memory Fog but already has an immunity effect.`);
+        // Potentially throw an error or return a specific status if stacking isn't allowed and mana shouldn't be consumed.
+        // For now, mana is consumed, but effect is not re-applied if one exists.
+      }
+      break;
+    }
+    case "KARMIC_SWAP": {
+      if (targetIndex === -1 || targetIndex === casterIndex) { // Ensure target is valid and not self
+        throw new HttpsError("invalid-argument", "Valid target player required for Karmic Swap and cannot target self.");
+      }
+      const casterCurrentPosition = players[casterIndex].position;
+      const targetCurrentPosition = players[targetIndex].position;
+
+      players[casterIndex].position = targetCurrentPosition;
+      players[targetIndex].position = casterCurrentPosition;
+      logger.info(`Karmic Swap: ${players[casterIndex].displayName} (was at ${casterCurrentPosition}) swapped with ${players[targetIndex].displayName} (was at ${targetCurrentPosition})`);
+      break;
+    }
+    case "DOKKAEBI_MISCHIEF": {
+      if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
+        throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for Dokkaebi's Mischief.");
+      }
+      if (gameData.board[options.tileIndex].trap) {
+        throw new HttpsError("failed-precondition", "This tile already has a trap.");
+      }
+
+      const boardCopy = [...gameData.board];
+      boardCopy[options.tileIndex] = {
+        ...boardCopy[options.tileIndex],
+        trap: {
+          ownerId: uid,
+          spellId: spell.id,
+          effectType: "MANA_LOSS", // As per spell definition
+          manaAmount: spell.effectDetails?.manaLoss || 15, // Get from definition, fallback
+        },
+      };
+      logger.info(`Player ${players[casterIndex].displayName} placed Dokkaebi's Mischief on tile ${options.tileIndex}.`);
+      // Update board specifically for trap spells, then players and lastSpellCast in the final update
+      await gameRef.update({
+        board: boardCopy,
+        players: players, // Also save player mana update
+        lastSpellCast: { spellId, casterId: uid, targetId, options },
+      });
+      return { success: true, message: "Dokkaebi's Mischief placed." }; // Return early as board is updated
     }
   }
 
+  // Ensure players array reflects changes to caster from mana deduction and potential effects
+  // players[casterIndex] = caster; // This was done before the switch for mana, re-ensure for effects if caster object was modified directly.
+
   await gameRef.update({
-    players: players,
-    lastSpellCast: { spellId, casterId: uid, targetId: targetId, options }, // targetId might be null for RUNE_TRAP but handled above
+    players: players, // This will save caster's reduced mana, and any effects applied to caster/target positions
+    lastSpellCast: { spellId, casterId: uid, targetId: targetId, options, blocked: false }, // Ensure 'blocked' is part of the data
   });
   return { success: true };
 });
