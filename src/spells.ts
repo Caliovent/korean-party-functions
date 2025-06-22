@@ -12,7 +12,8 @@ export type SpellId =
   | "ASTRAL_SWAP"
   | "MEMORY_FOG"
   | "KARMIC_SWAP"
-  | "DOKKAEBI_MISCHIEF";
+  | "DOKKAEBI_MISCHIEF"
+  | "MANA_STEAL";
 
 interface SpellDefinition {
   id: SpellId;
@@ -94,4 +95,13 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     requiresTarget: 'tile',
     effectDetails: { manaLoss: 15 },
   },
+  MANA_STEAL: {
+    id: "MANA_STEAL",
+    name: "Vol de Mana",
+    manaCost: 25,
+    type: "OFFENSIVE",
+    description: "Vole 20 Mana à la cible et vous les donne.",
+    requiresTarget: 'player',
+    effectDetails: { manaAmount: 20 },
+  }
 };

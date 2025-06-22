@@ -97,6 +97,19 @@ export interface Game {
   // guildTag?: string;
 }
 
+// Interface pour un item SRS (ex: rune, carte de vocabulaire)
+export interface SrsItem {
+  id: string;
+  userId: string;
+  content: string; // Le contenu à réviser (ex: mot, phrase)
+  lastReviewedAt: admin.firestore.Timestamp | null;
+  nextReviewTimestamp: admin.firestore.Timestamp;
+  interval: number; // En jours, ou autre unité de temps
+  easeFactor: number; // Facteur de facilité pour l'algorithme SM-2 like
+  // Potentiellement d'autres champs: type (vocab, grammar), deckId, etc.
+}
+
+
 // Represents a member of a Guild within the Guild document
 export interface GuildMemberDetail {
   role: string; // e.g., "master", "member", "officer"

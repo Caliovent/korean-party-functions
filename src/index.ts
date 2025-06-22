@@ -1528,6 +1528,89 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 });
 
 // =================================================================
+//                    SYSTÈME DE RÉPÉTITION ESPACÉE (SRS)
+// =================================================================
+
+export const submitSrsReview = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour soumettre une révision SRS.");
+  }
+  const uid = request.auth.uid;
+  const { srsItemId, wasCorrect } = request.data;
+
+  if (typeof srsItemId !== "string" || srsItemId.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'ID de l'item SRS (srsItemId) est requis.");
+  }
+  if (typeof wasCorrect !== "boolean") {
+    throw new HttpsError("invalid-argument", "Le champ 'wasCorrect' (booléen) est requis.");
+  }
+
+  const srsItemRef = db.collection("users").doc(uid).collection("srsItems").doc(srsItemId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const srsItemDoc = await transaction.get(srsItemRef);
+      if (!srsItemDoc.exists) {
+        throw new HttpsError("not-found", `L'item SRS avec l'ID "${srsItemId}" n'a pas été trouvé.`);
+      }
+
+      const srsItemData = srsItemDoc.data();
+      if (!srsItemData) { // Pour satisfaire TypeScript, bien que .exists devrait suffire
+        throw new HttpsError("internal", "Données de l'item SRS non trouvées après vérification de l'existence.");
+      }
+
+      let newInterval: number;
+      let newEaseFactor = srsItemData.easeFactor || 2.5; // Valeur par défaut si non défini
+
+      if (wasCorrect) {
+        if (srsItemData.interval === 0) { // Première révision correcte
+          newInterval = 1;
+        } else if (srsItemData.interval === 1) { // Deuxième révision correcte
+          newInterval = 6;
+        } else { // Révisions suivantes correctes
+          newInterval = Math.round(srsItemData.interval * newEaseFactor);
+        }
+        // Optionnel: ajuster le facteur de facilité (SM-2 like)
+        // newEaseFactor += 0.1; // Exemple simple, SM-2 est plus complexe
+      } else {
+        newInterval = 1; // Réinitialiser l'intervalle
+        // Optionnel: ajuster le facteur de facilité (SM-2 like)
+        // newEaseFactor = Math.max(1.3, newEaseFactor - 0.2); // Exemple simple
+      }
+
+      // Limiter l'intervalle maximum si nécessaire (ex: 1 an)
+      // newInterval = Math.min(newInterval, 365);
+
+      const now = admin.firestore.Timestamp.now();
+      const newNextReviewTimestamp = admin.firestore.Timestamp.fromMillis(
+        now.toMillis() + newInterval * 24 * 60 * 60 * 1000 // interval en jours
+      );
+
+      transaction.update(srsItemRef, {
+        interval: newInterval,
+        easeFactor: newEaseFactor,
+        lastReviewedAt: now,
+        nextReviewTimestamp: newNextReviewTimestamp,
+      });
+
+      return {
+        success: true,
+        message: "Révision SRS mise à jour.",
+        nextReviewAt: newNextReviewTimestamp.toDate().toISOString(),
+        newInterval: newInterval,
+      };
+    });
+  } catch (error) {
+    logger.error(`Erreur lors de la mise à jour de l'item SRS ${srsItemId} pour l'utilisateur ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la mise à jour de la révision SRS.");
+  }
+});
+
+
+// =================================================================
 //                    HANGEUL TYPHOON FUNCTIONS
 // =================================================================
 
@@ -1952,6 +2035,21 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
         lastSpellCast: { spellId, casterId: uid, targetId, options },
       });
       return { success: true, message: "Dokkaebi's Mischief placed." }; // Return early as board is updated
+    }
+    case "MANA_STEAL": {
+      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Cible requise pour MANA_STEAL.");
+      if (casterIndex === targetIndex) throw new HttpsError("invalid-argument", "Ne peut pas se cibler soi-même avec MANA_STEAL.");
+
+      const target = { ...players[targetIndex] }; // Mutable copy of target
+      const manaToSteal = spell.effectDetails?.manaAmount || 20; // Default to 20 if not defined
+
+      const actualStolenAmount = Math.min(target.mana, manaToSteal);
+      target.mana -= actualStolenAmount;
+      caster.mana += actualStolenAmount;
+
+      players[casterIndex] = caster; // Update caster in the main array
+      players[targetIndex] = target; // Update target in the main array
+      break;
     }
   }
 

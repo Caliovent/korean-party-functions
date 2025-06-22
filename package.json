@@ -8,7 +8,9 @@
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "test:backend": "jest --runInBand --detectOpenHandles",
+    "emulators:start": "firebase emulators:start"
   },
   "engines": {
     "node": "18"
@@ -19,11 +21,17 @@
     "firebase-functions": "6.3.2"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/jest": "^30.0.0",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
     "eslint": "^8.57.0",
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.29.1",
+    "firebase-functions-test": "^3.4.1",
+    "firebase-tools": "^14.8.0",
+    "jest": "^30.0.2",
+    "ts-jest": "^29.4.0",
     "typescript": "^5.4.5"
   },
   "private": true
