@@ -4,11 +4,12 @@
     "lint": "eslint --ext .js,.ts .",
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "serve": "npm run build && firebase emulators:start --only functions",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "test": "firebase emulators:exec --only firestore \"env FIREBASE_AUTH_EMULATOR_HOST='localhost:9099' FIRESTORE_EMULATOR_HOST='localhost:8080' mocha -t 10000 --require ts-node/register test/**/*.test.ts\""
   },
   "engines": {
     "node": "18"
@@ -19,11 +20,18 @@
     "firebase-functions": "6.3.2"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/chai": "^5.2.2",
+    "@types/mocha": "^10.0.10",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
+    "chai": "^5.2.0",
     "eslint": "^8.57.0",
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.29.1",
+    "firebase-tools": "^14.8.0",
+    "mocha": "^11.7.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },
   "private": true

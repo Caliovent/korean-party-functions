@@ -1,5 +1,16 @@
 {
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".", // Inclure la racine pour que les chemins relatifs dans les tests fonctionnent
+    "noEmit": true, // Important pour ts-node, car il fait sa propre transpilation en mémoire
+    "types": [
+      "mocha", // Ajoute les types globaux de Mocha
+      "node"   // Ajoute les types globaux de Node.js (souvent utile pour les tests)
+    ]
+  },
   "include": [
+    "src/**/*.ts",    // Inclut les sources pour la résolution des types
+    "test/**/*.ts",   // Inclut les fichiers de test
     ".eslintrc.js"
   ]
 }
