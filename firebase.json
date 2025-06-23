@@ -1,4 +1,21 @@
 {
+  "functions": [
+    {
+      "source": "lib", // Répertoire des fonctions compilées
+      "codebase": "default",
+      "runtime": "nodejs18", // Spécifier le moteur d'exécution
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firestore-debug.log"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR/../\" run lint", // Ajuster le chemin si package.json n'est pas dans functions/
+        "npm --prefix \"$RESOURCE_DIR/../\" run build"  // Ajuster le chemin si package.json n'est pas dans functions/
+      ]
+    }
+  ],
   "firestore": {
     "rules": "firestore.rules"
   },

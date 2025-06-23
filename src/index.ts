@@ -8,7 +8,7 @@ import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour 
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
 import { getXpForLevel } from "./xpUtils";
-import { Player, Tile, Guild, Grimoire, GuildMember, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse } from "./types"; // Added Game
+import { Player, Tile, Guild, Grimoire, GuildMemberDetail, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse, QuestDefinition, PlayerActiveQuest } from "./types"; // Added QuestDefinition, PlayerActiveQuest
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards, EventCard } from "./data/eventCards";
 
@@ -246,6 +246,124 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
       throw error;
     }
     throw new HttpsError("internal", "Une erreur interne est survenue lors de la création de la guilde.");
+  }
+});
+
+async function completeQuestInternal(transaction: admin.firestore.Transaction, userId: string, questId: string, questDef: QuestDefinition) {
+  const userRef = db.collection("users").doc(userId);
+  const playerActiveQuestRef = db.collection("playerQuests").doc(userId).collection("activeQuests").doc(questId); // CORRIGÉ: uid -> userId
+  const playerCompletedQuestRef = db.collection("playerQuests").doc(userId).collection("completedQuests").doc(questId);
+
+  // 1. Lire les récompenses (déjà passées via questDef) et mettre à jour le profil utilisateur
+  if (questDef.rewards.xp) {
+    transaction.update(userRef, {
+      xp: FieldValue.increment(questDef.rewards.xp)
+    });
+  }
+  // Ajouter d'autres récompenses ici (mana, items, etc.)
+
+  // 2. Créer le document de quête complétée
+  const completedQuestData = {
+    questId: questId,
+    completedAt: FieldValue.serverTimestamp(),
+    // title: questDef.title, // Dénormalisation optionnelle
+  };
+  transaction.set(playerCompletedQuestRef, completedQuestData);
+
+  // 3. Supprimer la quête active
+  transaction.delete(playerActiveQuestRef);
+
+  logger.info(`Quest ${questId} completed for user ${userId}. XP awarded: ${questDef.rewards.xp || 0}`);
+}
+
+
+export const submitGameAction = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour soumettre une action de jeu.");
+  }
+  const uid = request.auth.uid; // C'est le userId
+  const { actionType, actionDetails } = request.data; // actionDetails pourrait contenir { theme: "food" } par exemple
+
+  if (typeof actionType !== "string" || !actionType) {
+    throw new HttpsError("invalid-argument", "Le type d'action (actionType) est manquant ou invalide.");
+  }
+
+  const playerActiveQuestsRef = db.collection("playerQuests").doc(uid).collection("activeQuests");
+
+  try {
+    const activeQuestsSnapshot = await playerActiveQuestsRef.get();
+    if (activeQuestsSnapshot.empty) {
+      // logger.info(`User ${uid} has no active quests to update for action ${actionType}.`);
+      return { success: true, message: "Aucune quête active à mettre à jour." };
+    }
+
+    let questsUpdated = 0;
+    let questsCompleted = 0;
+
+    for (const questDoc of activeQuestsSnapshot.docs) {
+      const activeQuest = questDoc.data() as PlayerActiveQuest; // Utiliser PlayerActiveQuest de src/types
+      const questDefRef = db.collection("questDefinitions").doc(activeQuest.questId);
+      const questDefDoc = await questDefRef.get();
+
+      if (!questDefDoc.exists) {
+        logger.warn(`Quest definition ${activeQuest.questId} not found for active quest of user ${uid}. Skipping.`);
+        continue;
+      }
+      const questDef = questDefDoc.data() as QuestDefinition; // Utiliser QuestDefinition de src/types
+
+      // Supposons pour l'instant que les quêtes ont un seul objectif pour simplifier
+      // et que currentStep se réfère à cet objectif (toujours 0 pour l'instant).
+      const objective = questDef.objectives[activeQuest.currentStep || 0];
+      if (!objective) {
+        logger.warn(`Objective not found for quest ${activeQuest.questId}, step ${activeQuest.currentStep || 0}. User: ${uid}`);
+        continue;
+      }
+
+      // Logique de correspondance d'objectif (simplifiée)
+      // Par exemple, si actionType est "minigame_food_completed" et objective.type est "minigame_food_completed"
+      let actionMatchesObjective = false;
+      if (objective.type === actionType) {
+         // Pourrait y avoir des vérifications plus poussées dans actionDetails si nécessaire
+         // Par exemple, si objective.targetId est défini (ex: un mini-jeu spécifique)
+        actionMatchesObjective = true;
+      }
+      // Exemple plus complexe: si l'objectif est de "réussir un mini-jeu sur le thème X"
+      // et que actionDetails contient { theme: "food" } et objective.targetId est "food"
+      // if (objective.type === "minigame_theme_completed" && objective.targetId === actionDetails?.theme) {
+      //   actionMatchesObjective = true;
+      // }
+
+
+      if (actionMatchesObjective) {
+        const newProgress = (activeQuest.progress || 0) + 1;
+
+        if (newProgress >= objective.target) {
+          // Quête (ou étape d'objectif) complétée
+          await db.runTransaction(async (transaction) => {
+            // Utiliser la fonction interne pour la logique de complétion
+            // On passe questDef pour éviter une relecture dans la transaction
+            await completeQuestInternal(transaction, uid, activeQuest.questId, questDef);
+          });
+          questsCompleted++;
+        } else {
+          // Mettre à jour la progression
+          await playerActiveQuestsRef.doc(activeQuest.questId).update({ progress: newProgress });
+          questsUpdated++;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: `Action ${actionType} traitée. Quêtes mises à jour: ${questsUpdated}, Quêtes complétées: ${questsCompleted}.`
+    };
+
+  } catch (error) {
+    logger.error(`Erreur lors du traitement de l'action ${actionType} pour ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors du traitement de l'action de jeu.");
   }
 });
 
@@ -563,6 +681,68 @@ export const deleteGame = onCall(async (request) => {
     throw new HttpsError("internal", "Une erreur interne est survenue lors de la suppression de la partie.");
   }
 });
+
+// =================================================================
+//                    QUEST SYSTEM FUNCTIONS
+// =================================================================
+
+export const acceptQuest = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour accepter une quête.");
+  }
+  const uid = request.auth.uid;
+  const { questId } = request.data;
+
+  if (typeof questId !== "string" || questId.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'ID de la quête (questId) est manquant ou invalide.");
+  }
+
+  const questDefinitionRef = db.collection("questDefinitions").doc(questId);
+  const playerActiveQuestRef = db.collection("playerQuests").doc(uid).collection("activeQuests").doc(questId);
+  const playerCompletedQuestRef = db.collection("playerQuests").doc(uid).collection("completedQuests").doc(questId);
+
+  try {
+    const questDefDoc = await questDefinitionRef.get();
+    if (!questDefDoc.exists) {
+      throw new HttpsError("not-found", `La définition de la quête ${questId} n'existe pas.`);
+    }
+
+    // Vérifier si la quête est déjà active
+    const activeQuestDoc = await playerActiveQuestRef.get();
+    if (activeQuestDoc.exists) {
+      throw new HttpsError("failed-precondition", `La quête ${questId} est déjà active.`);
+    }
+
+    // Vérifier si la quête est déjà complétée
+    const completedQuestDoc = await playerCompletedQuestRef.get();
+    if (completedQuestDoc.exists) {
+      throw new HttpsError("failed-precondition", `La quête ${questId} a déjà été complétée.`);
+    }
+
+    // TODO: Vérifier les prérequis de la quête (niveau, autres quêtes complétées) si implémenté plus tard
+
+    const newActiveQuestData = {
+      questId: questId,
+      progress: 0,
+      currentStep: 0, // Supposant que les quêtes commencent à l'étape 0
+      startedAt: FieldValue.serverTimestamp(),
+      // On pourrait dénormaliser le titre/description ici si besoin, mais pour l'instant on les lit de questDefinitions
+    };
+
+    await playerActiveQuestRef.set(newActiveQuestData);
+
+    logger.info(`Player ${uid} accepted quest ${questId}.`);
+    return { success: true, message: `Quête ${questId} acceptée.` };
+
+  } catch (error) {
+    logger.error(`Erreur lors de l'acceptation de la quête ${questId} par ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de l'acceptation de la quête.");
+  }
+});
+
 
 // =================================================================
 //                    ACHIEVEMENT FUNCTIONS
@@ -1317,6 +1497,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
       titleKey: selectedCard.titleKey,
       descriptionKey: selectedCard.descriptionKey,
       GfxUrl: selectedCard.GfxUrl,
+      type: selectedCard.type, // Dénormaliser le type pour accès facile
       // Optional: include type and effectDetails if frontend needs them directly,
       // but mission only specified titleKey, descriptionKey, GfxUrl for lastEventCard.
     };
@@ -1493,12 +1674,16 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     // players[currentPlayerIndex].skipNextTurn = true; // Set it locally for the save below.
     // This was implicitly done by `await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true });`
     // but to be safe for the *current* `players` array that will be saved:
-    if (gameData.lastEventCard && eventCards.find((c) => c.title === gameData.lastEventCard.title)?.effect.type === "SKIP_TURN") {
+    /*
+    // Commenting out this block as the logic for SKIP_TURN_SELF is handled when the card is drawn
+    // and the player's skipNextTurn flag is set directly. This check appears redundant and was causing type errors.
+    if (gameData.lastEventCard && eventCards.find((c) => c.titleKey === gameData.lastEventCard.titleKey)?.type === "SKIP_TURN_SELF") {
       // Ensure the flag is set on the current player object in the `players` array that will be saved.
       // This assumes the effect was meant for the current player's *next* turn.
       // This should be handled by the effect setting `skipNextTurn` on the player object directly.
-      // players[currentPlayerIndex].skipNextTurn = true;
+      // players[currentPlayerIndex].skipNextTurn = true; // This is now handled by the event card logic directly.
     }
+    */
   }
 
   // Decrement effect durations for the player whose turn is ending

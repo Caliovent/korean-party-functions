@@ -45,5 +45,40 @@ service cloud.firestore {
     // match /users/{userId}/learningItemsStatus/{itemId} {
     //   allow read, write: if request.auth != null && request.auth.uid == userId;
     // }
+
+    // Quest System Rules
+    // Quest definitions are public to read for authenticated users, write by admin only (via console/SDK admin)
+    match /questDefinitions/{questId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Managed by admin/backend
+    }
+
+    // Player's quest data
+    match /playerQuests/{userId} {
+      // Allow user to access their own quest documents root, but not necessarily list all users' quest roots.
+      // Specific rules for subcollections below.
+      allow get: if request.auth != null && request.auth.uid == userId; // Allow read of the user's own playerQuests document (if it exists)
+      allow list: if false; // Don't allow listing all playerQuests documents for all users
+
+      // Active quests for a player
+      match /activeQuests/{questDocId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        // Writes (create, update, delete) are handled by Cloud Functions.
+        // acceptQuest (create), submitGameAction (update), completeQuest (delete from active)
+        // For TDD, tests might directly manipulate if function doesn't exist yet.
+        // If functions run with user's auth context, this rule would be:
+        // allow write: if request.auth != null && request.auth.uid == userId;
+        // If functions run with admin privileges, client writes should be false.
+        // For now, to support tests and initial function dev:
+        allow write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Completed quests for a player
+      match /completedQuests/{questDocId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        // Writes (create) are handled by Cloud Functions (completeQuest)
+        allow write: if false; // Client should not directly write to completedQuests
+      }
+    }
   }
 }
