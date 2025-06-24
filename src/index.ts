@@ -132,6 +132,12 @@ export const onUserCreate = functionsV1
         },
         activeQuests: [],
         completedQuests: [],
+        ownedCosmetics: [], // Initialize with no owned cosmetics
+        equippedCosmetics: { // Initialize with no equipped cosmetics
+          outfit: null,
+          pet: null,
+          spellEffect: null,
+        },
       });
 
       console.log(`[Auth Trigger] Firestore document successfully created for user ${uid}.`);
@@ -248,6 +254,64 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
       throw error;
     }
     throw new HttpsError("internal", "Une erreur interne est survenue lors de la création de la guilde.");
+  }
+});
+
+// =================================================================
+//                    GESTION DES COSMETIQUES
+// =================================================================
+
+export const equipCosmeticItem = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour équiper un objet cosmétique.");
+  }
+  const { uid } = request.auth;
+  const { itemId, slot } = request.data;
+
+  if (typeof itemId !== "string" || itemId.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'ID de l'objet (itemId) est manquant ou invalide.");
+  }
+  if (typeof slot !== "string" || slot.trim() === "") {
+    throw new HttpsError("invalid-argument", "Le slot d'équipement (slot) est manquant ou invalide.");
+  }
+
+  const userRef = db.collection("users").doc(uid);
+
+  try {
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) {
+      throw new HttpsError("not-found", "Profil utilisateur non trouvé.");
+    }
+    const userData = userDoc.data();
+
+    // Verify ownership
+    if (!userData?.ownedCosmetics || !userData.ownedCosmetics.includes(itemId)) {
+      throw new HttpsError("failed-precondition", "Vous ne possédez pas cet objet cosmétique.");
+    }
+
+    // Validate slot
+    const validSlots = ["outfit", "pet", "spellEffect"];
+    if (!validSlots.includes(slot)) {
+      throw new HttpsError("invalid-argument", `Slot d'équipement invalide. Les slots valides sont : ${validSlots.join(", ")}.`);
+    }
+
+    // Update equipped cosmetics
+    // Make sure equippedCosmetics field exists, though it should from onUserCreate
+    const currentEquipped = userData.equippedCosmetics || { outfit: null, pet: null, spellEffect: null };
+    currentEquipped[slot] = itemId;
+
+    await userRef.update({
+      [`equippedCosmetics.${slot}`]: itemId,
+    });
+
+    logger.info(`User ${uid} equipped item ${itemId} in slot ${slot}.`);
+    return { success: true, message: "Objet cosmétique équipé avec succès." };
+  } catch (error) {
+    logger.error(`Erreur lors de l'équipement de l'objet ${itemId} pour l'utilisateur ${uid} dans le slot ${slot}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de l'équipement de l'objet cosmétique.");
   }
 });
 
