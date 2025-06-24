@@ -37,7 +37,9 @@ const generateBoardLayout = (): Tile[] => {
 
 setGlobalOptions({ region: "europe-west1" });
 
-admin.initializeApp();
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 const db = admin.firestore();
 
 
@@ -1674,17 +1676,27 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     // players[currentPlayerIndex].skipNextTurn = true; // Set it locally for the save below.
     // This was implicitly done by `await gameRef.update({ [`players.${currentPlayerIndex}.effects.skipNextTurn`]: true });`
     // but to be safe for the *current* `players` array that will be saved:
-    /*
-    // Commenting out this block as the logic for SKIP_TURN_SELF is handled when the card is drawn
-    // and the player's skipNextTurn flag is set directly. This check appears redundant and was causing type errors.
-    if (gameData.lastEventCard && eventCards.find((c) => c.titleKey === gameData.lastEventCard.titleKey)?.type === "SKIP_TURN_SELF") {
-      // Ensure the flag is set on the current player object in the `players` array that will be saved.
-      // This assumes the effect was meant for the current player's *next* turn.
-      // This should be handled by the effect setting `skipNextTurn` on the player object directly.
-      // players[currentPlayerIndex].skipNextTurn = true; // This is now handled by the event card logic directly.
+
+    // Correction: Utiliser titleKey et vérifier le type de la carte directement.
+    // gameData.lastEventCard maintenant contient titleKey, descriptionKey, GfxUrl.
+    // La logique de SKIP_TURN_SELF est déjà gérée dans le switch plus haut, où players[currentPlayerIndex].skipNextTurn = true; est défini.
+    // Ce bloc if semble être une tentative redondante ou une logique de vérification/débogage.
+    // Si l'objectif est de vérifier que la carte tirée était bien une carte SKIP_TURN_SELF:
+    if (gameData.lastEventCard?.titleKey) {
+      const lastCardDrawn = eventCards.find(card => card.titleKey === gameData.lastEventCard!.titleKey);
+      if (lastCardDrawn && lastCardDrawn.type === "SKIP_TURN_SELF") {
+        // Cette condition confirme que la dernière carte était une carte pour passer le tour.
+        // L'effet (players[currentPlayerIndex].skipNextTurn = true;) a déjà été appliqué
+        // lors du traitement de l'événement (switch case pour selectedCard.type === "SKIP_TURN_SELF").
+        // Il n'est pas nécessaire de le réappliquer ici. On peut ajouter un log si besoin.
+        logger.info(`Confirmatory check: Player ${players[currentPlayerIndex].displayName} indeed drew a SKIP_TURN_SELF card.`);
+      }
     }
-    */
-  }
+    // Ensure the flag is set on the current player object in the `players` array that will be saved.
+    // This assumes the effect was meant for the current player's *next* turn.
+    // This should be handled by the effect setting `skipNextTurn` on the player object directly.
+    // players[currentPlayerIndex].skipNextTurn = true; // Cette ligne était suivie d'une accolade en trop
+  } // Fin du if (tile.type === "event")
 
   // Decrement effect durations for the player whose turn is ending
   const playerWhoseTurnIsEnding = players[currentPlayerIndex];
@@ -1716,28 +1728,26 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 //                    HANGEUL TYPHOON FUNCTIONS
 // =================================================================
 
-export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }, async (request): Promise<SendTyphoonAttackResponse> => {
-  logger.info("sendTyphoonAttack request received:", request.data);
+// Logique interne de sendTyphoonAttack, exportée pour les tests
+export async function sendTyphoonAttackLogic(
+  requestData: SendTyphoonAttackRequest,
+  authContext: { uid: string } // Simule request.auth pour les tests
+): Promise<SendTyphoonAttackResponse> {
+  logger.info("sendTyphoonAttackLogic called with data:", requestData);
+  logger.info("Authenticated user for logic:", authContext.uid);
 
   // Top-level variables for catch block logging, if needed before they are assigned in try.
-  let gameIdForCatch: string | undefined = request.data.gameId; // Attempt to get it early
-  let attackerPlayerIdForCatch: string | undefined = request.data.attackerPlayerId;
+  let gameIdForCatch: string | undefined = requestData.gameId;
+  let attackerPlayerIdForCatch: string | undefined = requestData.attackerPlayerId;
 
   try {
-    // 1. Authentication Check & UID Extraction
-    if (!request.auth) {
-      logger.error("Unauthenticated call to sendTyphoonAttack");
-      throw new HttpsError("unauthenticated", "Authentication required.");
-    }
-    const uid = request.auth.uid;
-    logger.info(`User ${uid} authenticated.`);
+    // 1. UID Extraction (Utilise authContext.uid)
+    const uid = authContext.uid;
+    logger.info(`User ${uid} authenticated for logic execution.`);
 
-    // 2. Extract Request Data
-    const { gameId, attackerPlayerId, targetPlayerId, attackWord } = request.data;
-    // Update context for catch block
-    gameIdForCatch = gameId;
-    attackerPlayerIdForCatch = attackerPlayerId;
-
+    // 2. Extract Request Data (directement depuis requestData)
+    const { gameId, attackerPlayerId, targetPlayerId, attackWord } = requestData;
+    // Update context for catch block (already done with requestData)
 
     // 3. Attacker ID Verification
     if (attackerPlayerId !== uid) {
@@ -1764,7 +1774,6 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
     // 5. Fetch Game Document
     const gameRef = db.collection("games").doc(gameId);
     let gameDoc;
-    // Specific try-catch for Firestore fetch, could be part of the main try-catch too.
     try {
       gameDoc = await gameRef.get();
     } catch (error) {
@@ -1781,7 +1790,7 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
       logger.error(`Game with ID ${gameId} not found.`);
       throw new HttpsError("not-found", `Game with ID ${gameId} not found.`);
     }
-    const gameData = gameDoc.data() as Game; // Type assertion using Game type
+    const gameData = gameDoc.data() as Game;
     logger.info(`Game ${gameId} found.`);
 
     if (gameData.status !== "playing") {
@@ -1795,16 +1804,16 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
     const targetPlayer = gameData.players.find((p) => p.uid === targetPlayerId);
 
     if (!attackerPlayer) {
-      logger.error(`Attacker player ${attackerPlayerId} object not found in game ${gameId} despite prior checks.`);
-      throw new HttpsError("internal", `Attacker ${attackerPlayerId} data is inconsistent within game ${gameId}.`);
+      logger.error(`Attacker player ${attackerPlayerId} object not found in game ${gameId}.`);
+      throw new HttpsError("internal", `Attacker ${attackerPlayerId} data is inconsistent.`);
     }
     if (!targetPlayer) {
-      logger.error(`Target player ${targetPlayerId} object not found in game ${gameId} despite prior checks.`);
-      throw new HttpsError("internal", `Target ${targetPlayerId} data is inconsistent within game ${gameId}.`);
+      logger.error(`Target player ${targetPlayerId} object not found in game ${gameId}.`);
+      throw new HttpsError("internal", `Target ${targetPlayerId} data is inconsistent.`);
     }
     if (targetPlayer.blocks === undefined || targetPlayer.blocks === null) {
-      logger.error(`Target player ${targetPlayerId} blocks array is undefined or null. Game data: `, gameData);
-      throw new HttpsError("internal", `Target player ${targetPlayerId} blocks data is missing or inconsistent.`);
+      logger.error(`Target player ${targetPlayerId} blocks array is undefined or null.`);
+      throw new HttpsError("internal", `Target player ${targetPlayerId} blocks data is missing.`);
     }
     logger.info(`Attacker ${attackerPlayerId} data: groundHeight ${attackerPlayer.groundHeight}`);
     logger.info(`Target ${targetPlayerId} data: ${targetPlayer.blocks.length} blocks, groundHeight ${targetPlayer.groundHeight}`);
@@ -1813,7 +1822,7 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
       logger.error("Attacker and target cannot be the same player.");
       throw new HttpsError("invalid-argument", "Attacker and target cannot be the same player.");
     }
-    logger.info(`Attacker ${attackerPlayerId} and Target ${targetPlayerId} game states retrieved and verified in game ${gameId}.`);
+    logger.info(`Attacker ${attackerPlayerId} and Target ${targetPlayerId} game states retrieved.`);
 
     const currentTime = admin.firestore.Timestamp.now();
     let targetBlock: Player["blocks"][0] | undefined = undefined;
@@ -1832,26 +1841,26 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
     let failureReason = "";
 
     if (!targetBlock) {
-      logger.info(`Attack validation: No active block found for word "${attackWord}" for target ${targetPlayerId}.`);
+      logger.info(`No active block found for word "${attackWord}" for target ${targetPlayerId}.`);
       failureReason = "WORD_NOT_FOUND_OR_DESTROYED";
       isAttackSuccessful = false;
     } else {
       if (targetBlock.vulnerableAt.toMillis() <= currentTime.toMillis()) {
-        logger.info(`Attack validation: Block "${targetBlock.text}" for target ${targetPlayerId} is vulnerable.`);
+        logger.info(`Block "${targetBlock.text}" for target ${targetPlayerId} is vulnerable.`);
         isAttackSuccessful = true;
       } else {
-        logger.info(`Attack validation: Block "${targetBlock.text}" for target ${targetPlayerId} is not vulnerable. Vulnerable at: ${targetBlock.vulnerableAt.toDate().toISOString()}, Current time: ${currentTime.toDate().toISOString()}`);
+        logger.info(`Block "${targetBlock.text}" for target ${targetPlayerId} is not vulnerable.`);
         failureReason = "BLOCK_NOT_VULNERABLE";
         isAttackSuccessful = false;
       }
     }
 
     if (isAttackSuccessful) {
-      if (!targetBlock || blockIndex === -1) {
-        logger.error("Critical error: targetBlock or blockIndex is invalid in successful attack path.", { targetBlock, blockIndex });
-        throw new HttpsError("internal", "Inconsistent state during successful attack processing.");
+      if (!targetBlock || blockIndex === -1) { // Should not happen if isAttackSuccessful is true
+        logger.error("Critical error: targetBlock or blockIndex is invalid in successful attack path.");
+        throw new HttpsError("internal", "Inconsistent state in successful attack.");
       }
-      logger.info(`Processing successful attack on block: ${targetBlock.id} - ${targetBlock.text} for target ${targetPlayer.uid}`);
+      logger.info(`Processing successful attack on block: ${targetBlock.id} for target ${targetPlayer.uid}`);
       const updatedTargetBlocks = JSON.parse(JSON.stringify(targetPlayer.blocks));
       updatedTargetBlocks[blockIndex].isDestroyed = true;
       const destroyedBlockWord = targetBlock.text;
@@ -1864,7 +1873,7 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
         return p;
       });
       await gameRef.update({ players: updatedPlayers });
-      logger.info(`Firestore updated successfully for successful attack. Target: ${targetPlayer.uid}, Block: ${targetBlock.id}`);
+      logger.info(`Firestore updated for successful attack. Target: ${targetPlayer.uid}`);
       return {
         status: "success",
         message: "Attack successful. Target's block destroyed.",
@@ -1874,13 +1883,9 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
         targetGroundRiseAmount: targetGroundRiseAmount,
       } as SendTyphoonAttackSuccessResponse;
     } else {
-      if (!attackerPlayer) {
-        logger.error("Critical error: attackerPlayer is invalid in failed attack path.", { attackerPlayerId });
-        throw new HttpsError("internal", "Inconsistent state during failed attack processing: attacker data missing.");
-      }
       const attackerPenaltyGroundRiseAmount = DEFAULT_PENALTY_RISE_AMOUNT;
       const newAttackerGroundHeight = (attackerPlayer.groundHeight || 0) + attackerPenaltyGroundRiseAmount;
-      logger.info(`Processing failed attack for attacker: ${attackerPlayer.uid}. Reason: ${failureReason}. Applying penalty of ${attackerPenaltyGroundRiseAmount}. New ground height: ${newAttackerGroundHeight}`);
+      logger.info(`Processing failed attack for ${attackerPlayer.uid}. Reason: ${failureReason}. Penalty: ${attackerPenaltyGroundRiseAmount}.`);
       const updatedPlayers = gameData.players.map((p) => {
         if (p.uid === attackerPlayer.uid) {
           return { ...p, groundHeight: newAttackerGroundHeight };
@@ -1888,7 +1893,7 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
         return p;
       });
       await gameRef.update({ players: updatedPlayers });
-      logger.info(`Firestore updated successfully for failed attack. Attacker: ${attackerPlayer.uid} penalized.`);
+      logger.info(`Firestore updated for failed attack. Attacker: ${attackerPlayer.uid} penalized.`);
       return {
         status: "failure",
         reason: failureReason || "UNKNOWN_FAILURE",
@@ -1898,17 +1903,26 @@ export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>({ cors: true }
       } as SendTyphoonAttackFailureResponse;
     }
   } catch (error) {
-    // Log with context if available
-    logger.error(`Unhandled error in sendTyphoonAttack for game: ${gameIdForCatch || "unknown"}, attacker: ${attackerPlayerIdForCatch || "unknown"}, error:`, error);
+    logger.error(`Unhandled error in sendTyphoonAttackLogic for game: ${gameIdForCatch}, attacker: ${attackerPlayerIdForCatch}:`, error);
     if (error instanceof HttpsError) {
-      throw error; // Re-throw HttpsErrors directly
+      throw error;
     }
-    // For other errors, throw a generic HttpsError
     const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-    throw new HttpsError("internal", "An unexpected internal error occurred processing your attack.", { details: errorMessage });
+    throw new HttpsError("internal", "Internal error processing attack.", { details: errorMessage });
   }
-});
+}
 
+export const sendTyphoonAttack = onCall<SendTyphoonAttackRequest>(
+  { cors: true },
+  async (request): Promise<SendTyphoonAttackResponse> => {
+    if (!request.auth) {
+      logger.error("Unauthenticated onCall to sendTyphoonAttack");
+      throw new HttpsError("unauthenticated", "Authentication required.");
+    }
+    // Appelle la logique interne avec les données et le contexte d'authentification
+    return sendTyphoonAttackLogic(request.data, { uid: request.auth.uid });
+  }
+);
 
 export const castSpell = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Non authentifié.");

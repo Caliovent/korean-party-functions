@@ -7,6 +7,7 @@
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
+    "test": "npm run build && firebase emulators:exec --only firestore \"jest --testTimeout=60000\"",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
     "test": "npm run build && firebase emulators:exec --project firestore-emulator-example --only firestore,functions,auth \"env FIREBASE_AUTH_EMULATOR_HOST='localhost:9099' FIRESTORE_EMULATOR_HOST='localhost:8080' FUNCTIONS_EMULATOR_HOST='localhost:5001' mocha -t 10000 --require ts-node/register test/**/*.test.ts\""
@@ -24,6 +25,7 @@
     "@firebase/rules-unit-testing": "^4.0.1",
     "@types/chai": "^5.2.2",
     "@types/mocha": "^10.0.10",
+    "@types/jest": "^30.0.0",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
     "chai": "^5.2.0",
@@ -33,6 +35,8 @@
     "firebase-tools": "^14.8.0",
     "mocha": "^11.7.0",
     "ts-node": "^10.9.2",
+    "jest": "^30.0.2",
+    "ts-jest": "^29.4.0",
     "typescript": "^5.4.5"
   },
   "private": true

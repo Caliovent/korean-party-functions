@@ -80,7 +80,6 @@ export interface Game {
     descriptionKey: string; // Corresponds to EventCard.descriptionKey
     GfxUrl: string;         // Corresponds to EventCard.GfxUrl
     type?: string;          // Denormalized EventCard.type for easier client logic
-    // id?: string; // if needed to reference back to eventCards data (EventCard.id)
   };
   createdAt: admin.firestore.Timestamp;
   // Effects array for spells like Memory Fog, Mana Shield
