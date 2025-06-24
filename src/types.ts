@@ -75,11 +75,11 @@ export interface Game {
     targetId?: string; // Can be null for terrain spells like RUNE_TRAP
     options?: Record<string, unknown>; // For additional data like tileIndex for RUNE_TRAP
   };
-  lastEventCard?: { // Correspond à ce qui est stocké par resolveTileAction
-    id?: string; // Optionnel, mais bon à avoir pour référence directe
-    titleKey: string;
-    descriptionKey: string;
-    GfxUrl?: string; // Optionnel, si GfxUrl est ajouté à eventCardDataForFirestore
+  lastEventCard?: {
+    titleKey: string;       // Corresponds to EventCard.titleKey
+    descriptionKey: string; // Corresponds to EventCard.descriptionKey
+    GfxUrl: string;         // Corresponds to EventCard.GfxUrl
+    type?: string;          // Denormalized EventCard.type for easier client logic
   };
   createdAt: admin.firestore.Timestamp;
   // Effects array for spells like Memory Fog, Mana Shield
@@ -178,3 +178,73 @@ export interface SendTyphoonAttackFailureResponse extends SendTyphoonAttackRespo
 }
 
 export type SendTyphoonAttackResponse = SendTyphoonAttackSuccessResponse | SendTyphoonAttackFailureResponse;
+
+// --- Quest System Types ---
+
+/**
+ * Describes a single objective within a quest.
+ */
+export interface QuestObjective {
+  description: string; // e.g., "Réussir 3 mini-jeux sur le thème de la nourriture"
+  type: string;        // e.g., "minigame_food_completed", "collect_grimoire_X", "cast_spell_Y"
+  target: number;      // e.g., 3 (for 3 mini-games)
+  // Optional: specific ID related to the objective, e.g. grimoireId if type is "collect_grimoire_X"
+  targetId?: string;
+}
+
+/**
+ * Describes the rewards for completing a quest.
+ */
+export interface QuestReward {
+  xp?: number;
+  mana?: number;
+  // Potentially other types of rewards: items, currency, etc.
+  // itemIds?: string[];
+  // fragments?: { vocab?: number; grammar?: number; culture?: number };
+}
+
+/**
+ * Defines the structure of a quest as stored in the `questDefinitions` collection.
+ */
+export interface QuestDefinition {
+  id: string; // Document ID, same as the questId
+  title: string;
+  description: string;
+  objectives: QuestObjective[];
+  rewards: QuestReward;
+  // Optional:
+  // prerequisites?: { questIds?: string[]; level?: number }; // Quests or level required to start this one
+  // isRepeatable?: boolean;
+  // category?: string; // e.g., "daily", "main_story", "event"
+}
+
+/**
+ * Base data for a player's quest entry (active or completed).
+ */
+export interface PlayerQuestBase {
+  questId: string; // Reference to the QuestDefinition
+  // title?: string; // Denormalized for easier display, but can be fetched from QuestDefinition
+  // description?: string; // Denormalized
+}
+
+/**
+ * Represents a quest currently active for a player.
+ * Stored in `playerQuests/{userId}/activeQuests/{questId}`.
+ */
+export interface PlayerActiveQuest extends PlayerQuestBase {
+  progress: number;      // Current progress towards the objective's target
+  currentStep: number;   // For multi-step objectives within a single quest (0-indexed)
+  startedAt: admin.firestore.Timestamp;
+  // Optional: specific progress details if objectives are complex
+  // objectiveProgress?: { [objectiveType: string]: number };
+}
+
+/**
+ * Represents a quest completed by a player.
+ * Stored in `playerQuests/{userId}/completedQuests/{questId}`.
+ */
+export interface PlayerCompletedQuest extends PlayerQuestBase {
+  completedAt: admin.firestore.Timestamp;
+  // Optional: Store how rewards were given, or if they were claimed separately
+  // rewardsClaimed?: boolean;
+}
