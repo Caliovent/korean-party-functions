@@ -146,6 +146,12 @@ export interface UserProfile {
     wordsTypedInTyphoon: number; // Nombre total de mots corrects tapés dans "Hangeul Typhoon"
     perfectQuizzes: number; // Nombre de mini-jeux de quiz réussis sans erreur
   };
+  ownedCosmetics: string[]; // IDs of cosmetics owned by the user
+  equippedCosmetics: { // IDs of equipped cosmetics per slot
+    outfit: string | null;
+    pet: string | null;
+    spellEffect: string | null;
+  };
 }
 
 // Request Payload Interface for Hangeul Typhoon Attack
