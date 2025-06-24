@@ -75,10 +75,11 @@ export interface Game {
     targetId?: string; // Can be null for terrain spells like RUNE_TRAP
     options?: Record<string, unknown>; // For additional data like tileIndex for RUNE_TRAP
   };
-  lastEventCard?: { // Added to store information about the last drawn event card
-    title: string;
-    description: string;
-    // id?: string; // if needed to reference back to eventCards data
+  lastEventCard?: { // Correspond à ce qui est stocké par resolveTileAction
+    id?: string; // Optionnel, mais bon à avoir pour référence directe
+    titleKey: string;
+    descriptionKey: string;
+    GfxUrl?: string; // Optionnel, si GfxUrl est ajouté à eventCardDataForFirestore
   };
   createdAt: admin.firestore.Timestamp;
   // Effects array for spells like Memory Fog, Mana Shield
