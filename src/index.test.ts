@@ -16,7 +16,6 @@ import {
   SendTyphoonAttackRequest,
   SendTyphoonAttackSuccessResponse,
   SendTyphoonAttackFailureResponse,
-  TyphoonBlock
 } from "./types";
 // Importer sendTyphoonAttackLogic au lieu de sendTyphoonAttack
 import { sendTyphoonAttackLogic } from "./index";
@@ -48,9 +47,9 @@ interface PlayerSetup {
 
 /**
  * Initialise un état de duel dans l'émulateur Firestore pour les tests.
- * @param gameId L'ID du jeu de duel à créer.
- * @param player1Setup Configuration du joueur 1.
- * @param player2Setup Configuration du joueur 2.
+ * @param {string} gameId L'ID du jeu de duel à créer.
+ * @param {PlayerSetup} player1Setup Configuration du joueur 1.
+ * @param {PlayerSetup} player2Setup Configuration du joueur 2.
  */
 export async function setupDuelState(
   gameId: string,
@@ -72,7 +71,8 @@ export async function setupDuelState(
     })),
   }));
 
-  const duelGame: Partial<Game> = { // Utilisation de Partial<Game> car nous ne définissons que les champs nécessaires au test
+  // Utilisation de Partial<Game> car nous ne définissons que les champs nécessaires au test
+  const duelGame: Partial<Game> = {
     // name: `Test Duel ${gameId}`, // Optionnel
     hostId: player1Setup.uid, // Arbitraire
     status: "playing", // Le jeu doit être en cours pour que les attaques soient valides
@@ -113,16 +113,31 @@ describe("sendTyphoonAttack Cloud Function", () => {
       { // Attaquant
         uid: ATTACKER_UID,
         displayName: "Attaquant Test",
-        blocks: [{ text: "someblock", vulnerableAt: admin.firestore.Timestamp.now() }], // Blocs non pertinents pour ce test
+        blocks: [
+          { text: "someblock", vulnerableAt: admin.firestore.Timestamp.now() },
+        ], // Blocs non pertinents pour ce test
         groundHeight: initialAttackerGroundHeight,
       },
       { // Cible
         uid: TARGET_UID,
         displayName: "Cible Test",
         blocks: [
-          { text: "autrebloc", vulnerableAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 3600000)) }, // Protégé
-          { text: vulnerableWord, vulnerableAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 1000)) }, // Vulnérable
-          { text: "encoreun", vulnerableAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 500)) }, // Autre vulnérable
+          {
+            text: "autrebloc",
+            vulnerableAt: admin.firestore.Timestamp.fromDate(
+              new Date(Date.now() + 3600000)
+            ),
+          }, // Protégé
+          {
+            text: vulnerableWord,
+            vulnerableAt: admin.firestore.Timestamp.fromDate(
+              new Date(Date.now() - 1000)
+            ),
+          }, // Vulnérable
+          {
+            text: "encoreun",
+            vulnerableAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() - 500)),
+          }, // Autre vulnérable
         ],
         groundHeight: initialTargetGroundHeight,
       }
@@ -155,22 +170,22 @@ describe("sendTyphoonAttack Cloud Function", () => {
     expect(gameDoc.exists).toBe(true);
     const gameData = gameDoc.data() as Game;
 
-    const targetPlayer = gameData.players.find(p => p.uid === TARGET_UID);
+    const targetPlayer = gameData.players.find((p) => p.uid === TARGET_UID);
     expect(targetPlayer).toBeDefined();
     expect(targetPlayer!.groundHeight).toBe(initialTargetGroundHeight + successResult.targetGroundRiseAmount);
 
     // 3. Vérifier que le groundHeight de l'attaquant n'a pas changé
-    const attackerPlayer = gameData.players.find(p => p.uid === ATTACKER_UID);
+    const attackerPlayer = gameData.players.find((p) => p.uid === ATTACKER_UID);
     expect(attackerPlayer).toBeDefined();
     expect(attackerPlayer!.groundHeight).toBe(initialAttackerGroundHeight);
 
     // 4. Vérifier que le bloc "승리" de l'adversaire est marqué comme détruit
-    const targetBlock = targetPlayer!.blocks.find(b => b.text === vulnerableWord);
+    const targetBlock = targetPlayer!.blocks.find((b) => b.text === vulnerableWord);
     expect(targetBlock).toBeDefined();
     expect(targetBlock!.isDestroyed).toBe(true);
 
     // Optionnel: vérifier que les autres blocs ne sont pas détruits
-    const otherBlock = targetPlayer!.blocks.find(b => b.text === "autrebloc");
+    const otherBlock = targetPlayer!.blocks.find((b) => b.text === "autrebloc");
     expect(otherBlock).toBeDefined();
     expect(otherBlock!.isDestroyed).toBe(false);
   });
@@ -196,8 +211,14 @@ describe("sendTyphoonAttack Cloud Function", () => {
         uid: TARGET_UID,
         displayName: "Cible Test",
         blocks: [
-          { text: protectedWord, vulnerableAt: admin.firestore.Timestamp.fromMillis(Date.now() + 3600000) }, // Protégé (futur)
-          { text: "vulnérable_non_cible", vulnerableAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000) }, // Vulnérable
+          {
+            text: protectedWord,
+            vulnerableAt: admin.firestore.Timestamp.fromMillis(Date.now() + 3600000),
+          }, // Protégé (futur)
+          {
+            text: "vulnérable_non_cible",
+            vulnerableAt: admin.firestore.Timestamp.fromMillis(Date.now() - 1000),
+          }, // Vulnérable
         ],
         groundHeight: initialTargetGroundHeight,
       }
@@ -229,20 +250,22 @@ describe("sendTyphoonAttack Cloud Function", () => {
     expect(gameDoc.exists).toBe(true);
     const gameData = gameDoc.data() as Game;
 
-    const attackerPlayer = gameData.players.find(p => p.uid === ATTACKER_UID);
+    const attackerPlayer = gameData.players.find((p) => p.uid === ATTACKER_UID);
     expect(attackerPlayer).toBeDefined();
-    expect(attackerPlayer!.groundHeight).toBe(initialAttackerGroundHeight + failureResult.attackerPenaltyGroundRiseAmount);
+    expect(attackerPlayer!.groundHeight).toBe(
+      initialAttackerGroundHeight + failureResult.attackerPenaltyGroundRiseAmount
+    );
 
     // 3. Vérifier que l'état de l'adversaire (sol et blocs) est inchangé
-    const targetPlayer = gameData.players.find(p => p.uid === TARGET_UID);
+    const targetPlayer = gameData.players.find((p) => p.uid === TARGET_UID);
     expect(targetPlayer).toBeDefined();
     expect(targetPlayer!.groundHeight).toBe(initialTargetGroundHeight); // Inchangé
 
-    const targetBlockProtected = targetPlayer!.blocks.find(b => b.text === protectedWord);
+    const targetBlockProtected = targetPlayer!.blocks.find((b) => b.text === protectedWord);
     expect(targetBlockProtected).toBeDefined();
     expect(targetBlockProtected!.isDestroyed).toBe(false); // Inchangé
 
-    const targetBlockVulnerable = targetPlayer!.blocks.find(b => b.text === "vulnérable_non_cible");
+    const targetBlockVulnerable = targetPlayer!.blocks.find((b) => b.text === "vulnérable_non_cible");
     expect(targetBlockVulnerable).toBeDefined();
     expect(targetBlockVulnerable!.isDestroyed).toBe(false); // Inchangé aussi
   });
@@ -298,15 +321,17 @@ describe("sendTyphoonAttack Cloud Function", () => {
     expect(gameDoc.exists).toBe(true);
     const gameData = gameDoc.data() as Game;
 
-    const attackerPlayer = gameData.players.find(p => p.uid === ATTACKER_UID);
+    const attackerPlayer = gameData.players.find((p) => p.uid === ATTACKER_UID);
     expect(attackerPlayer).toBeDefined();
-    expect(attackerPlayer!.groundHeight).toBe(initialAttackerGroundHeight + failureResult.attackerPenaltyGroundRiseAmount);
+    expect(attackerPlayer!.groundHeight).toBe(
+      initialAttackerGroundHeight + failureResult.attackerPenaltyGroundRiseAmount
+    );
 
     // 3. Vérifier que l'état de l'adversaire (sol et blocs) est inchangé (optionnel mais bon à vérifier)
-    const targetPlayer = gameData.players.find(p => p.uid === TARGET_UID);
+    const targetPlayer = gameData.players.find((p) => p.uid === TARGET_UID);
     expect(targetPlayer).toBeDefined();
     expect(targetPlayer!.groundHeight).toBe(initialTargetGroundHeight);
-    targetPlayer!.blocks.forEach(block => {
+    targetPlayer!.blocks.forEach((block) => {
       expect(block.isDestroyed).toBe(false);
     });
   });

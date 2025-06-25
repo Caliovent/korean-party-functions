@@ -10,9 +10,6 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-interface PurchaseShopItemData {
-  itemId: string;
-}
 
 interface UserDoc {
   moonShards: number;
@@ -29,17 +26,17 @@ interface ShopItemDoc {
   // ... autres champs potentiels de l'article
 }
 
-export const purchaseShopItem = functions.https.onCall(async (data: PurchaseShopItemData, context) => {
+export const purchaseShopItem = functions.https.onCall(async (request) => {
   // 1. Valider que l'utilisateur est authentifié.
-  if (!context.auth) {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
       "L'utilisateur doit être authentifié pour effectuer un achat."
     );
   }
 
-  const userId = context.auth.uid;
-  const { itemId } = data;
+  const userId = request.auth.uid;
+  const { itemId } = request.data;
 
   if (!itemId || typeof itemId !== "string") {
     throw new functions.https.HttpsError(
@@ -112,7 +109,6 @@ export const purchaseShopItem = functions.https.onCall(async (data: PurchaseShop
       success: true,
       message: `Achat de '${itemName}' réussi ! Vos MoonShards ont été mis à jour.`,
     };
-
   } catch (error) {
     // Journaliser l'erreur côté serveur pour le débogage
     console.error("Erreur lors de l'achat de l'article:", error);
@@ -130,20 +126,17 @@ export const purchaseShopItem = functions.https.onCall(async (data: PurchaseShop
   }
 });
 
-interface LeaveGuildData {
-  guildId: string;
-}
 
-export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, context) => {
-  if (!context.auth) {
+export const leaveGuild = functions.https.onCall(async (request) => {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
       "L'utilisateur doit être authentifié pour quitter une guilde."
     );
   }
 
-  const { guildId } = data;
-  const userId = context.auth.uid;
+  const { guildId } = request.data;
+  const userId = request.auth.uid;
 
   if (!guildId || typeof guildId !== "string") {
     throw new functions.https.HttpsError(
@@ -168,13 +161,20 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
       const userData = userDoc.data();
 
       if (userData?.guildId !== guildId) {
-        throw new functions.https.HttpsError("failed-precondition", "L'utilisateur n'est pas membre de cette guilde (selon son profil).");
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "L'utilisateur n'est pas membre de cette guilde (selon son profil)."
+        );
       }
 
       if (!guildDoc.exists) {
         // If guild doesn't exist, but user thinks they are in it, clear user's guildId.
         transaction.update(userRef, { guildId: admin.firestore.FieldValue.delete() });
-        throw new functions.https.HttpsError("not-found", `Guilde avec l'ID "${guildId}" non trouvée. Votre profil a été mis à jour.`);
+        throw new functions.https.HttpsError(
+          "not-found",
+          `Guilde avec l'ID "${guildId}" non trouvée. ` +
+          "Votre profil a été mis à jour."
+        );
       }
       const guildData = guildDoc.data();
       if (!guildData || !guildData.members) {
@@ -185,11 +185,17 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
       if (!memberInfo) {
         // User's profile says they are in guild, but not listed in guild's members. Clean up user profile.
         transaction.update(userRef, { guildId: admin.firestore.FieldValue.delete() });
-        throw new functions.https.HttpsError("failed-precondition", "Vous n'êtes pas listé dans les membres de la guilde. Votre profil a été mis à jour.");
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Vous n'êtes pas listé dans les membres de la guilde. " +
+          "Votre profil a été mis à jour."
+        );
       }
 
       // Prepare updates
-      const userUpdate: { [key: string]: any; } = { guildId: admin.firestore.FieldValue.delete() };
+      const userUpdate: { [key: string]: admin.firestore.FieldValue } = {
+        guildId: admin.firestore.FieldValue.delete(),
+      };
       // Firestore does not allow dots in field names for FieldValue.delete() in update paths directly.
       // So, we need to create a new map without the user.
       const updatedMembers = { ...guildData.members };
@@ -201,15 +207,18 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
         if (newMemberCount === 0) {
           // Maître is the last member, dissolve the guild
           transaction.delete(guildRef);
-          message = `Vous avez quitté la guilde "${guildData.name}" en tant que Maître. Comme vous étiez le dernier membre, la guilde a été dissoute.`;
+          message =
+            `Vous avez quitté la guilde "${guildData.name}" en tant que Maître. ` +
+            "Comme vous étiez le dernier membre, la guilde a été dissoute.";
         } else {
           // Maître leaves, others remain. Promote the oldest member.
           let oldestMemberId = "";
           let oldestJoinedAt = new admin.firestore.Timestamp(9999999999, 999999999); // Far future date
 
           for (const [uid, member] of Object.entries(updatedMembers)) {
-            if (member && member.joinedAt && member.joinedAt.toMillis() < oldestJoinedAt.toMillis()) {
-              oldestJoinedAt = member.joinedAt;
+            const typedMember = member as { joinedAt?: admin.firestore.Timestamp };
+            if (typedMember && typedMember.joinedAt && typedMember.joinedAt.toMillis() < oldestJoinedAt.toMillis()) {
+              oldestJoinedAt = typedMember.joinedAt;
               oldestMemberId = uid;
             }
           }
@@ -222,7 +231,9 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
               memberCount: newMemberCount,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            message = `Vous avez quitté la guilde "${guildData.name}" en tant que Maître. ${updatedMembers[oldestMemberId].displayName} a été promu(e) nouveau Maître.`;
+            message =
+              `Vous avez quitté la guilde "${guildData.name}" en tant que Maître. ` +
+              `${updatedMembers[oldestMemberId].displayName} a été promu(e) nouveau Maître.`;
           } else {
             // Should not happen if newMemberCount > 0, but as a fallback:
             transaction.update(guildRef, { // Or delete if this state is considered invalid
@@ -231,7 +242,9 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
               memberCount: newMemberCount,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            message = `Vous avez quitté la guilde "${guildData.name}" en tant que Maître. Aucun autre membre n'a pu être promu.`;
+            message =
+              `Vous avez quitté la guilde "${guildData.name}" en tant que Maître. ` +
+              "Aucun autre membre n'a pu être promu.";
           }
         }
       } else {
@@ -247,7 +260,6 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
     });
 
     return { success: true, message };
-
   } catch (error) {
     console.error("Erreur lors de la tentative de quitter la guilde:", error);
     if (error instanceof functions.https.HttpsError) {
@@ -260,20 +272,17 @@ export const leaveGuild = functions.https.onCall(async (data: LeaveGuildData, co
   }
 });
 
-interface JoinGuildData {
-  guildId: string;
-}
 
-export const joinGuild = functions.https.onCall(async (data: JoinGuildData, context) => {
-  if (!context.auth) {
+export const joinGuild = functions.https.onCall(async (request) => {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
       "L'utilisateur doit être authentifié pour rejoindre une guilde."
     );
   }
 
-  const { guildId } = data;
-  const userId = context.auth.uid;
+  const { guildId } = request.data;
+  const userId = request.auth.uid;
 
   if (!guildId || typeof guildId !== "string") {
     throw new functions.https.HttpsError(
@@ -349,7 +358,7 @@ export const joinGuild = functions.https.onCall(async (data: JoinGuildData, cont
 
     return {
       success: true,
-      message: `Vous avez rejoint la guilde avec succès !`, // Consider adding guild name
+      message: "Vous avez rejoint la guilde avec succès !", // Consider adding guild name
     };
   } catch (error) {
     console.error("Erreur pour rejoindre la guilde:", error);
@@ -366,20 +375,17 @@ export const joinGuild = functions.https.onCall(async (data: JoinGuildData, cont
 // Potentiellement d'autres fonctions ici...
 // export const anotherFunction = functions.https.onRequest(...)
 
-interface GetGuildDetailsData {
-  guildId: string;
-}
 
-export const getGuildDetails = functions.https.onCall(async (data: GetGuildDetailsData, context) => {
-  if (!context.auth) {
+export const getGuildDetails = functions.https.onCall(async (request) => {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
       "L'utilisateur doit être authentifié pour voir les détails d'une guilde."
     );
   }
 
-  const { guildId } = data;
-  const userId = context.auth.uid;
+  const { guildId } = request.data;
+  const userId = request.auth.uid;
 
   if (!guildId || typeof guildId !== "string") {
     throw new functions.https.HttpsError(
@@ -419,12 +425,20 @@ export const getGuildDetails = functions.https.onCall(async (data: GetGuildDetai
 
     // Transform the members map into an array of objects as requested.
     // The displayName is already included in the members map entries.
-    const membersArray = Object.entries(guildData.members).map(([uid, memberData]: [string, any]) => ({
-      uid: uid,
-      displayName: memberData.displayName,
-      role: memberData.role,
-      // joinedAt: memberData.joinedAt, // Optionally include joinedAt if needed by frontend
-    }));
+    interface GuildMember {
+      displayName: string;
+      role: string;
+      joinedAt?: admin.firestore.Timestamp;
+    }
+    const membersArray = Object.entries(guildData.members).map(([uid, memberData]) => {
+      const typedMember = memberData as GuildMember;
+      return {
+        uid: uid,
+        displayName: typedMember.displayName,
+        role: typedMember.role,
+        // joinedAt: typedMember.joinedAt, // Optionally include joinedAt if needed by frontend
+      };
+    });
 
     return {
       id: guildDoc.id,
@@ -436,7 +450,6 @@ export const getGuildDetails = functions.https.onCall(async (data: GetGuildDetai
       // createdAt: guildData.createdAt, // Optionally include
       members: membersArray,
     };
-
   } catch (error) {
     console.error("Erreur lors de la récupération des détails de la guilde:", error);
     if (error instanceof functions.https.HttpsError) {
@@ -449,22 +462,17 @@ export const getGuildDetails = functions.https.onCall(async (data: GetGuildDetai
   }
 });
 
-interface CreateGuildData {
-  name: string;
-  tag: string;
-  description: string;
-}
 
-export const createGuild = functions.https.onCall(async (data: CreateGuildData, context) => {
-  if (!context.auth) {
+export const createGuild = functions.https.onCall(async (request) => {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
       "L'utilisateur doit être authentifié pour créer une guilde."
     );
   }
 
-  const { name, tag, description } = data;
-  const userId = context.auth.uid;
+  const { name, tag, description } = request.data;
+  const userId = request.auth.uid;
 
   if (!name || typeof name !== "string" || name.length < 3 || name.length > 50) {
     throw new functions.https.HttpsError(

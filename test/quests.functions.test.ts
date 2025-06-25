@@ -1,21 +1,19 @@
 import {
   initializeTestEnvironment,
   RulesTestEnvironment,
-  RulesTestContext,
 } from "@firebase/rules-unit-testing";
 import * as fs from "fs";
-import * as path from "path";
 import { describe, it, before, after, beforeEach, afterEach } from "mocha";
 import { expect } from "chai";
 
 import { initializeApp, FirebaseApp, deleteApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, writeBatch, getDocs, Firestore, connectFirestoreEmulator } from "firebase/firestore";
-import { getFunctions, connectFunctionsEmulator, httpsCallable, Functions } from 'firebase/functions';
+import { getFirestore, doc, getDoc, Firestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator, httpsCallable, Functions } from "firebase/functions";
 import { getAuth, connectAuthEmulator, signInWithCustomToken, Auth } from "firebase/auth";
 
 import * as admin from "firebase-admin";
 
-import { PlayerActiveQuest, QuestDefinition, UserProfile, PlayerCompletedQuest } from "../src/types";
+import { PlayerActiveQuest, QuestDefinition, UserProfile } from "../src/types";
 
 // Configuration
 const PROJECT_ID = "firestore-emulator-example";
@@ -39,7 +37,7 @@ const QUEST_FOOD_1_DATA: QuestDefinition = {
 };
 
 const USER_ID_ALICE = "alice";
-const USER_ID_BOB = "bob";
+
 
 let testEnv: RulesTestEnvironment;
 let adminFirestore: admin.firestore.Firestore;
@@ -50,7 +48,6 @@ let aliceDb: Firestore;
 
 
 describe("Gestion des Quêtes - Cloud Functions (Tests Unitaires)", () => {
-
   before(async () => {
     testEnv = await initializeTestEnvironment({
       projectId: PROJECT_ID,
@@ -71,7 +68,7 @@ describe("Gestion des Quêtes - Cloud Functions (Tests Unitaires)", () => {
     await testEnv.cleanup();
     const allApps = admin.apps.slice();
     for (const app of allApps) {
-        if (app) await app.delete();
+      if (app) await app.delete();
     }
     console.log(`View rule coverage information at ${COVERAGE_URL}`);
   });
@@ -79,23 +76,27 @@ describe("Gestion des Quêtes - Cloud Functions (Tests Unitaires)", () => {
   beforeEach(async () => {
     const collections = await adminFirestore.listCollections();
     for (const coll of collections) {
-        const docs = await coll.get();
-        const batch = adminFirestore.batch();
-        docs.forEach(d => batch.delete(d.ref));
-        await batch.commit();
+      const docs = await coll.get();
+      const batch = adminFirestore.batch();
+      docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
     }
 
     const firebaseConfig = { projectId: PROJECT_ID, apiKey: "test-api-key" };
     aliceApp = initializeApp(firebaseConfig, `alice-app-${USER_ID_ALICE}-${Date.now()}`);
 
     const authInstance: Auth = getAuth(aliceApp);
-    connectAuthEmulator(authInstance, "http://localhost:9099", {disableWarnings: true});
+    connectAuthEmulator(authInstance, "http://localhost:9099", { disableWarnings: true });
 
     try {
       const customToken = await admin.auth().createCustomToken(USER_ID_ALICE);
       await signInWithCustomToken(authInstance, customToken);
-    } catch (error: any) {
-      console.error(`Erreur lors de l'authentification d'Alice (${USER_ID_ALICE}): ${error.message}`, error.details);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error(`Erreur lors de l'authentification d'Alice (${USER_ID_ALICE}): ${error.message}`);
+      } else {
+        console.error(`Erreur lors de l'authentification d'Alice (${USER_ID_ALICE}):`, error);
+      }
     }
 
     aliceFunctions = getFunctions(aliceApp, "europe-west1");
@@ -116,7 +117,7 @@ describe("Gestion des Quêtes - Cloud Functions (Tests Unitaires)", () => {
   describe("Scénario 1: Acceptation de la Quête", () => {
     it("devrait permettre à un joueur d'accepter une quête et de la voir dans son journal", async () => {
       const userId = USER_ID_ALICE;
-      const acceptQuestCallable = httpsCallable(aliceFunctions, 'acceptQuest');
+      const acceptQuestCallable = httpsCallable(aliceFunctions, "acceptQuest");
       await acceptQuestCallable({ questId: QUEST_FOOD_1_ID });
 
       const playerQuestDocRef = doc(aliceDb, "playerQuests", userId, "activeQuests", QUEST_FOOD_1_ID);
@@ -136,24 +137,27 @@ describe("Gestion des Quêtes - Cloud Functions (Tests Unitaires)", () => {
       const userId = USER_ID_ALICE;
 
       const playerQuestDocRefAdmin = adminFirestore.collection("playerQuests").doc(userId)
-                                        .collection("activeQuests").doc(QUEST_FOOD_1_ID);
+        .collection("activeQuests").doc(QUEST_FOOD_1_ID);
       const initialPlayerQuestData: Partial<PlayerActiveQuest> = {
         questId: QUEST_FOOD_1_ID,
         progress: 1,
         currentStep: 0,
-        startedAt: admin.firestore.Timestamp.now() as any,
+        startedAt: admin.firestore.Timestamp.now(),
       };
       await playerQuestDocRefAdmin.set(initialPlayerQuestData);
 
       // ACT: Appeler submitGameAction
-      const submitActionCallable = httpsCallable(aliceFunctions, 'submitGameAction');
+      const submitActionCallable = httpsCallable(aliceFunctions, "submitGameAction");
       await submitActionCallable({ actionType: "minigame_food_completed", actionDetails: {} });
 
       const playerQuestDocRef = doc(aliceDb, "playerQuests", userId, "activeQuests", QUEST_FOOD_1_ID);
       const updatedPlayerQuestDoc = await getDoc(playerQuestDocRef);
 
       expect(updatedPlayerQuestDoc.exists(), "Le document de quête active devrait toujours exister").to.be.true;
-      expect(updatedPlayerQuestDoc.data()?.progress, "La progression de la quête aurait dû être mise à jour à 2").to.equal(2);
+      expect(
+        updatedPlayerQuestDoc.data()?.progress,
+        "La progression de la quête aurait dû être mise à jour à 2"
+      ).to.equal(2);
     });
   });
 
@@ -165,20 +169,45 @@ describe("Gestion des Quêtes - Cloud Functions (Tests Unitaires)", () => {
       const finalXp = initialXp + questRewardXp;
 
       const userProfileRefAdmin = adminFirestore.collection("users").doc(userId);
-      await userProfileRefAdmin.set({ userId: userId, xp: initialXp, displayName: "Alice", email: "alice@example.com", level: 1, manaCurrent:100, manaMax:100, fragments: {vocab:0, grammar:0, culture:0}, createdAt: admin.firestore.Timestamp.now(), stats: {gamesPlayed:0, gamesWon:0, duelsWon:0, spellsCast:0, grimoiresCollected:0, wordsTypedInTyphoon:0, perfectQuizzes:0} } as UserProfile);
+      await userProfileRefAdmin.set({
+        userId: userId,
+        xp: initialXp,
+        displayName: "Alice",
+        email: "alice@example.com",
+        level: 1,
+        manaCurrent: 100,
+        manaMax: 100,
+        fragments: { vocab: 0, grammar: 0, culture: 0 },
+        createdAt: admin.firestore.Timestamp.now(),
+        stats: {
+          gamesPlayed: 0,
+          gamesWon: 0,
+          duelsWon: 0,
+          spellsCast: 0,
+          grimoiresCollected: 0,
+          wordsTypedInTyphoon: 0,
+          perfectQuizzes: 0,
+        },
+        ownedCosmetics: [],
+        equippedCosmetics: {
+          outfit: null,
+          pet: null,
+          spellEffect: null,
+        },
+      } as UserProfile);
 
       const playerActiveQuestDocRefAdmin = adminFirestore.collection("playerQuests").doc(userId)
-                                            .collection("activeQuests").doc(QUEST_FOOD_1_ID);
+        .collection("activeQuests").doc(QUEST_FOOD_1_ID);
       const presqueCompleteQuestData: Partial<PlayerActiveQuest> = {
         questId: QUEST_FOOD_1_ID,
         progress: 2,
         currentStep: 0,
-        startedAt: admin.firestore.Timestamp.now() as any,
+        startedAt: admin.firestore.Timestamp.now(),
       };
       await playerActiveQuestDocRefAdmin.set(presqueCompleteQuestData);
 
       // ACT: Appeler submitGameAction pour compléter la quête
-      const submitActionCallable = httpsCallable(aliceFunctions, 'submitGameAction');
+      const submitActionCallable = httpsCallable(aliceFunctions, "submitGameAction");
       await submitActionCallable({ actionType: "minigame_food_completed", actionDetails: {} });
 
       const activeQuestDocRef = doc(aliceDb, "playerQuests", userId, "activeQuests", QUEST_FOOD_1_ID);

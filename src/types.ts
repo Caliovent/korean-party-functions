@@ -76,10 +76,10 @@ export interface Game {
     options?: Record<string, unknown>; // For additional data like tileIndex for RUNE_TRAP
   };
   lastEventCard?: {
-    titleKey: string;       // Corresponds to EventCard.titleKey
+    titleKey: string; // Corresponds to EventCard.titleKey
     descriptionKey: string; // Corresponds to EventCard.descriptionKey
-    GfxUrl: string;         // Corresponds to EventCard.GfxUrl
-    type?: string;          // Denormalized EventCard.type for easier client logic
+    GfxUrl: string; // Corresponds to EventCard.GfxUrl
+    type?: string; // Denormalized EventCard.type for easier client logic
   };
   createdAt: admin.firestore.Timestamp;
   // Effects array for spells like Memory Fog, Mana Shield
@@ -192,8 +192,8 @@ export type SendTyphoonAttackResponse = SendTyphoonAttackSuccessResponse | SendT
  */
 export interface QuestObjective {
   description: string; // e.g., "Réussir 3 mini-jeux sur le thème de la nourriture"
-  type: string;        // e.g., "minigame_food_completed", "collect_grimoire_X", "cast_spell_Y"
-  target: number;      // e.g., 3 (for 3 mini-games)
+  type: string; // e.g., "minigame_food_completed", "collect_grimoire_X", "cast_spell_Y"
+  target: number; // e.g., 3 (for 3 mini-games)
   // Optional: specific ID related to the objective, e.g. grimoireId if type is "collect_grimoire_X"
   targetId?: string;
 }
@@ -238,8 +238,8 @@ export interface PlayerQuestBase {
  * Stored in `playerQuests/{userId}/activeQuests/{questId}`.
  */
 export interface PlayerActiveQuest extends PlayerQuestBase {
-  progress: number;      // Current progress towards the objective's target
-  currentStep: number;   // For multi-step objectives within a single quest (0-indexed)
+  progress: number; // Current progress towards the objective's target
+  currentStep: number; // For multi-step objectives within a single quest (0-indexed)
   startedAt: admin.firestore.Timestamp;
   // Optional: specific progress details if objectives are complex
   // objectiveProgress?: { [objectiveType: string]: number };

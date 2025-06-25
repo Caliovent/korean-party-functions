@@ -8,9 +8,9 @@ import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour 
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
 import { getXpForLevel } from "./xpUtils";
-import { Player, Tile, Guild, Grimoire, GuildMemberDetail, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse, QuestDefinition, PlayerActiveQuest } from "./types"; // Added QuestDefinition, PlayerActiveQuest
+import { Player, Tile, Guild, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse, QuestDefinition, PlayerActiveQuest } from "./types"; // Added QuestDefinition, PlayerActiveQuest
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
-import { eventCards, EventCard } from "./data/eventCards";
+import { eventCards } from "./data/eventCards";
 
 // Mana Reward Constants
 const MANA_REWARD_MINI_GAME_QUIZ = 20;
@@ -148,8 +148,6 @@ export const onUserCreate = functionsV1
       );
     }
   });
-
-
 
 
 export const updateUserProfile = onCall({ cors: true }, async (request) => {
@@ -315,6 +313,13 @@ export const equipCosmeticItem = onCall({ cors: true }, async (request) => {
   }
 });
 
+/**
+ * Completes a quest for a user by updating rewards, moving the quest to completed, and removing it from active quests.
+ * @param {admin.firestore.Transaction} transaction - The Firestore transaction.
+ * @param {string} userId - The ID of the user completing the quest.
+ * @param {string} questId - The ID of the quest being completed.
+ * @param {QuestDefinition} questDef - The quest definition containing rewards and details.
+ */
 async function completeQuestInternal(transaction: admin.firestore.Transaction, userId: string, questId: string, questDef: QuestDefinition) {
   const userRef = db.collection("users").doc(userId);
   const playerActiveQuestRef = db.collection("playerQuests").doc(userId).collection("activeQuests").doc(questId); // CORRIGÉ: uid -> userId
@@ -323,7 +328,7 @@ async function completeQuestInternal(transaction: admin.firestore.Transaction, u
   // 1. Lire les récompenses (déjà passées via questDef) et mettre à jour le profil utilisateur
   if (questDef.rewards.xp) {
     transaction.update(userRef, {
-      xp: FieldValue.increment(questDef.rewards.xp)
+      xp: FieldValue.increment(questDef.rewards.xp),
     });
   }
   // Ajouter d'autres récompenses ici (mana, items, etc.)
@@ -348,6 +353,7 @@ export const submitGameAction = onCall({ cors: true }, async (request: functions
     throw new HttpsError("unauthenticated", "Vous devez être connecté pour soumettre une action de jeu.");
   }
   const uid = request.auth.uid; // C'est le userId
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { actionType, actionDetails } = request.data; // actionDetails pourrait contenir { theme: "food" } par exemple
 
   if (typeof actionType !== "string" || !actionType) {
@@ -389,8 +395,8 @@ export const submitGameAction = onCall({ cors: true }, async (request: functions
       // Par exemple, si actionType est "minigame_food_completed" et objective.type est "minigame_food_completed"
       let actionMatchesObjective = false;
       if (objective.type === actionType) {
-         // Pourrait y avoir des vérifications plus poussées dans actionDetails si nécessaire
-         // Par exemple, si objective.targetId est défini (ex: un mini-jeu spécifique)
+        // Pourrait y avoir des vérifications plus poussées dans actionDetails si nécessaire
+        // Par exemple, si objective.targetId est défini (ex: un mini-jeu spécifique)
         actionMatchesObjective = true;
       }
       // Exemple plus complexe: si l'objectif est de "réussir un mini-jeu sur le thème X"
@@ -421,9 +427,8 @@ export const submitGameAction = onCall({ cors: true }, async (request: functions
 
     return {
       success: true,
-      message: `Action ${actionType} traitée. Quêtes mises à jour: ${questsUpdated}, Quêtes complétées: ${questsCompleted}.`
+      message: `Action ${actionType} traitée. Quêtes mises à jour: ${questsUpdated}, Quêtes complétées: ${questsCompleted}.`,
     };
-
   } catch (error) {
     logger.error(`Erreur lors du traitement de l'action ${actionType} pour ${uid}:`, error);
     if (error instanceof HttpsError) {
@@ -442,7 +447,7 @@ export const listGuilds = onCall({ cors: true }, async (request) => {
   const DEFAULT_LIMIT = 10;
   const MAX_LIMIT = 25;
 
-  let limit = typeof reqLimit === "number" && reqLimit > 0 ? Math.min(reqLimit, MAX_LIMIT) : DEFAULT_LIMIT;
+  const limit = typeof reqLimit === "number" && reqLimit > 0 ? Math.min(reqLimit, MAX_LIMIT) : DEFAULT_LIMIT;
 
   let query = db.collection("guilds")
     .orderBy("name") // Order by name for consistent pagination
@@ -465,7 +470,7 @@ export const listGuilds = onCall({ cors: true }, async (request) => {
 
   try {
     const snapshot = await query.get();
-    const guilds: any[] = []; // Use a more specific type if possible, e.g., Partial<Guild> or a dedicated ListGuildEntry
+    const guilds: Partial<Guild>[] = []; // Use a more specific type instead of any[]
     snapshot.forEach((doc) => {
       const data = doc.data();
       guilds.push({
@@ -622,7 +627,7 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
       }
 
       // Prepare updates for the guild document
-      const guildUpdates: { [key: string]: any } = {
+      const guildUpdates: { [key: string]: admin.firestore.FieldValue | string | number | null | undefined } = {
         [`members.${uid}`]: FieldValue.delete(), // Remove member from map
         memberCount: FieldValue.increment(-1), // Decrement memberCount
       };
@@ -677,7 +682,7 @@ export const leaveGuild = onCall({ cors: true }, async (request: functions.https
 
       // Apply guild updates (member removal, count decrement, potential leader change)
       if (guildData.memberCount -1 > 0 || (guildData.leaderId === uid && newLeaderId)) { // Only update if guild not deleted
-         transaction.update(guildRef, guildUpdates);
+        transaction.update(guildRef, guildUpdates);
       }
 
       // Update the leaving user's profile
@@ -799,7 +804,6 @@ export const acceptQuest = onCall({ cors: true }, async (request: functions.http
 
     logger.info(`Player ${uid} accepted quest ${questId}.`);
     return { success: true, message: `Quête ${questId} acceptée.` };
-
   } catch (error) {
     logger.error(`Erreur lors de l'acceptation de la quête ${questId} par ${uid}:`, error);
     if (error instanceof HttpsError) {
@@ -1508,20 +1512,20 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     let manaLossFromTrap = 0;
 
     switch (trap.spellId) {
-      case "RUNE_TRAP":
-        manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.RUNE_TRAP.effectDetails?.manaLoss || 50; // Fallback to hardcoded if not on trap object
-        logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
-        trapTriggerMessage = `${currentPlayer.displayName} triggered a Rune Trap (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
-        break;
-      case "DOKKAEBI_MISCHIEF":
-        manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.DOKKAEBI_MISCHIEF.effectDetails?.manaLoss || 15; // Fallback
-        logger.info(`Player ${currentPlayer.uid} triggered Dokkaebi's Mischief on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
-        trapTriggerMessage = `${currentPlayer.displayName} triggered Dokkaebi's Mischief (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
-        break;
-      default:
-        logger.warn(`Unknown trap spellId encountered: ${trap.spellId} on tile ${currentPlayer.position}`);
-        // Decide if unknown traps should still be removed or have a default effect. For now, it does nothing.
-        break;
+    case "RUNE_TRAP":
+      manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.RUNE_TRAP.effectDetails?.manaLoss || 50; // Fallback to hardcoded if not on trap object
+      logger.info(`Player ${currentPlayer.uid} triggered a RUNE_TRAP on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
+      trapTriggerMessage = `${currentPlayer.displayName} triggered a Rune Trap (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
+      break;
+    case "DOKKAEBI_MISCHIEF":
+      manaLossFromTrap = trap.manaAmount || SPELL_DEFINITIONS.DOKKAEBI_MISCHIEF.effectDetails?.manaLoss || 15; // Fallback
+      logger.info(`Player ${currentPlayer.uid} triggered Dokkaebi's Mischief on tile ${currentPlayer.position} owned by ${trap.ownerId}. Mana loss: ${manaLossFromTrap}`);
+      trapTriggerMessage = `${currentPlayer.displayName} triggered Dokkaebi's Mischief (owned by ${trap.ownerId || "Unknown"}) and lost ${manaLossFromTrap} Mana!`;
+      break;
+    default:
+      logger.warn(`Unknown trap spellId encountered: ${trap.spellId} on tile ${currentPlayer.position}`);
+      // Decide if unknown traps should still be removed or have a default effect. For now, it does nothing.
+      break;
     }
 
     if (manaLossFromTrap > 0) {
@@ -1544,9 +1548,9 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     }
 
     if (trapTriggerMessage) { // If any known trap was triggered and handled
-        // Remove the trap from the tile
-        delete board[currentPlayer.position].trap; // Modify the mutable board copy
-        tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
+      // Remove the trap from the tile
+      delete board[currentPlayer.position].trap; // Modify the mutable board copy
+      tileEffectApplied = true; // Trap effect takes precedence over other standard tile effects.
     }
   }
 
@@ -1570,53 +1574,53 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 
     // Apply effects based on the new card structure
     switch (selectedCard.type) {
-      case "BONUS_MANA":
-        if (selectedCard.effectDetails.manaAmount !== undefined) {
-          currentPlayer.mana += selectedCard.effectDetails.manaAmount;
+    case "BONUS_MANA":
+      if (selectedCard.effectDetails.manaAmount !== undefined) {
+        currentPlayer.mana += selectedCard.effectDetails.manaAmount;
+      }
+      break;
+    case "MALUS_MANA": // Handles mana loss for the current player
+      if (selectedCard.effectDetails.manaAmount !== undefined) {
+        currentPlayer.mana += selectedCard.effectDetails.manaAmount; // manaAmount is negative for loss
+        if (currentPlayer.mana < 0) currentPlayer.mana = 0; // Ensure mana doesn't go below 0
+      }
+      break;
+    case "MOVE_RELATIVE":
+      if (selectedCard.effectDetails.moveAmount !== undefined) {
+        const moveAmount = selectedCard.effectDetails.moveAmount;
+        if (moveAmount < 0) {
+          currentPlayer.position = Math.max(0, currentPlayer.position + moveAmount);
+        } else {
+          currentPlayer.position = (currentPlayer.position + moveAmount) % board.length;
         }
-        break;
-      case "MALUS_MANA": // Handles mana loss for the current player
-        if (selectedCard.effectDetails.manaAmount !== undefined) {
-          currentPlayer.mana += selectedCard.effectDetails.manaAmount; // manaAmount is negative for loss
-          if (currentPlayer.mana < 0) currentPlayer.mana = 0; // Ensure mana doesn't go below 0
-        }
-        break;
-      case "MOVE_RELATIVE":
-        if (selectedCard.effectDetails.moveAmount !== undefined) {
-          const moveAmount = selectedCard.effectDetails.moveAmount;
-          if (moveAmount < 0) {
-            currentPlayer.position = Math.max(0, currentPlayer.position + moveAmount);
-          } else {
-            currentPlayer.position = (currentPlayer.position + moveAmount) % board.length;
-          }
-          // Note: Effect of the new tile is not resolved in this turn.
-        }
-        break;
-      case "SKIP_TURN_SELF":
-        // This effect means the current player skips their *own* next turn.
-        // The existing skip logic at the end of resolveTileAction handles a player
-        // starting their turn with a `skipNextTurn` flag. So, we set that flag here.
-        // Ensure the player object structure can hold this, e.g., `effects.skipNextTurn` or a direct `skipNextTurn` boolean.
-        // The existing function uses `player.skipNextTurn`.
-        players[currentPlayerIndex].skipNextTurn = true;
-        logger.info(`Player ${currentPlayer.displayName} affected by ${selectedCard.titleKey}, will skip their next turn.`);
-        break;
-      case "EXTRA_ROLL":
-        players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
-        await gameRef.update({
-          players: players,
-          lastEventCard: eventCardDataForFirestore, // Update with new structure
-          // currentPlayerId remains the same
-          turnState: "AWAITING_ROLL", // Player rolls again
-        });
-        // Return structure for EXTRA_ROLL might need adjustment if frontend expects specific "event" details.
-        // For now, returning the selectedCard which is compliant with the new structure.
-        return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
-      case "QUIZ_CULTUREL":
-        // No mechanical game effect for now, just display the card.
-        // The card display is handled by setting lastEventCard.
-        logger.info(`Player ${currentPlayer.displayName} drew a cultural quiz card: ${selectedCard.titleKey}`);
-        break;
+        // Note: Effect of the new tile is not resolved in this turn.
+      }
+      break;
+    case "SKIP_TURN_SELF":
+      // This effect means the current player skips their *own* next turn.
+      // The existing skip logic at the end of resolveTileAction handles a player
+      // starting their turn with a `skipNextTurn` flag. So, we set that flag here.
+      // Ensure the player object structure can hold this, e.g., `effects.skipNextTurn` or a direct `skipNextTurn` boolean.
+      // The existing function uses `player.skipNextTurn`.
+      players[currentPlayerIndex].skipNextTurn = true;
+      logger.info(`Player ${currentPlayer.displayName} affected by ${selectedCard.titleKey}, will skip their next turn.`);
+      break;
+    case "EXTRA_ROLL":
+      players[currentPlayerIndex] = currentPlayer; // Save any changes to current player first
+      await gameRef.update({
+        players: players,
+        lastEventCard: eventCardDataForFirestore, // Update with new structure
+        // currentPlayerId remains the same
+        turnState: "AWAITING_ROLL", // Player rolls again
+      });
+      // Return structure for EXTRA_ROLL might need adjustment if frontend expects specific "event" details.
+      // For now, returning the selectedCard which is compliant with the new structure.
+      return { success: true, effect: "EXTRA_ROLL", event: selectedCard };
+    case "QUIZ_CULTUREL":
+      // No mechanical game effect for now, just display the card.
+      // The card display is handled by setting lastEventCard.
+      logger.info(`Player ${currentPlayer.displayName} drew a cultural quiz card: ${selectedCard.titleKey}`);
+      break;
     }
 
     players[currentPlayerIndex] = currentPlayer; // Ensure current player's state is updated in the local array
@@ -1634,26 +1638,26 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 
   if (!tileEffectApplied) {
     switch (tile.type) {
-      case "MANA_GAIN":
-        currentPlayer.mana += 10;
-        players[currentPlayerIndex] = currentPlayer;
-        break;
-      case "MINI_GAME_QUIZ": // New case
-        logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
-        currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
-        // Optional: Cap mana if a manaMax is defined for the player in-game object
-        // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
-        players[currentPlayerIndex] = currentPlayer;
-        tileEffectApplied = true; // Mark that an effect was applied for this tile
-        // Add a log or event for the client if needed
-        await gameRef.update({
-          players: players, // Update players array with new mana value
-          log: FieldValue.arrayUnion({
-            message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
-            timestamp: FieldValue.serverTimestamp(),
-          }),
-        });
-        break;
+    case "MANA_GAIN":
+      currentPlayer.mana += 10;
+      players[currentPlayerIndex] = currentPlayer;
+      break;
+    case "MINI_GAME_QUIZ": // New case
+      logger.info(`Player ${currentPlayer.uid} landed on MINI_GAME_QUIZ.`);
+      currentPlayer.mana += MANA_REWARD_MINI_GAME_QUIZ; // Using the constant
+      // Optional: Cap mana if a manaMax is defined for the player in-game object
+      // if (currentPlayer.mana > currentPlayer.manaMax) currentPlayer.mana = currentPlayer.manaMax;
+      players[currentPlayerIndex] = currentPlayer;
+      tileEffectApplied = true; // Mark that an effect was applied for this tile
+      // Add a log or event for the client if needed
+      await gameRef.update({
+        players: players, // Update players array with new mana value
+        log: FieldValue.arrayUnion({
+          message: `${currentPlayer.displayName} gained ${MANA_REWARD_MINI_GAME_QUIZ} Mana from a Quiz!`,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+      });
+      break;
       // TODO: Add case for HANGEUL_TYPHOON if it's a separate tile type
       // case "HANGEUL_TYPHOON":
       //   currentPlayer.mana += MANA_REWARD_HANGEUL_TYPHOON; // Placeholder for future use
@@ -1747,7 +1751,7 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
     // Ce bloc if semble être une tentative redondante ou une logique de vérification/débogage.
     // Si l'objectif est de vérifier que la carte tirée était bien une carte SKIP_TURN_SELF:
     if (gameData.lastEventCard?.titleKey) {
-      const lastCardDrawn = eventCards.find(card => card.titleKey === gameData.lastEventCard!.titleKey);
+      const lastCardDrawn = eventCards.find((card) => card.titleKey === gameData.lastEventCard!.titleKey);
       if (lastCardDrawn && lastCardDrawn.type === "SKIP_TURN_SELF") {
         // Cette condition confirme que la dernière carte était une carte pour passer le tour.
         // L'effet (players[currentPlayerIndex].skipNextTurn = true;) a déjà été appliqué
@@ -1793,6 +1797,13 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
 // =================================================================
 
 // Logique interne de sendTyphoonAttack, exportée pour les tests
+
+/**
+ * Handles the logic for processing a Typhoon attack in the Hangeul Typhoon mini-game.
+ * @param {SendTyphoonAttackRequest} requestData - The data for the attack request.
+ * @param {{ uid: string }} authContext - The authentication context, simulating request.auth for tests.
+ * @return {Promise<SendTyphoonAttackResponse>} The response indicating the result of the attack.
+ */
 export async function sendTyphoonAttackLogic(
   requestData: SendTyphoonAttackRequest,
   authContext: { uid: string } // Simule request.auth pour les tests
@@ -1801,8 +1812,8 @@ export async function sendTyphoonAttackLogic(
   logger.info("Authenticated user for logic:", authContext.uid);
 
   // Top-level variables for catch block logging, if needed before they are assigned in try.
-  let gameIdForCatch: string | undefined = requestData.gameId;
-  let attackerPlayerIdForCatch: string | undefined = requestData.attackerPlayerId;
+  const gameIdForCatch: string | undefined = requestData.gameId;
+  const attackerPlayerIdForCatch: string | undefined = requestData.attackerPlayerId;
 
   try {
     // 1. UID Extraction (Utilise authContext.uid)
@@ -2043,7 +2054,7 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   if (spell.id === "KIMCHIS_MALICE" && targetIndex !== -1 && targetIndex !== casterIndex) {
     const targetPlayer = { ...players[targetIndex] }; // Mutable copy of target
     const immunityEffectIndex = (targetPlayer.effects || []).findIndex(
-      (eff: any) => eff.type === "SHIELDED" || eff.type === "IMMUNE_TO_NEXT_SPELL"
+      (eff: { type: string; duration: number; spellId?: string }) => eff.type === "SHIELDED" || eff.type === "IMMUNE_TO_NEXT_SPELL"
     );
 
     if (immunityEffectIndex > -1) {
@@ -2105,117 +2116,117 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
   }
 
   switch (spell.id) {
-    case "BLESSING_OF_HANGEUL": {
-      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
-      players[targetIndex].mana += 10; // Changed from 5 to 10
-      break;
+  case "BLESSING_OF_HANGEUL": {
+    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for BLESSING_OF_HANGEUL.");
+    players[targetIndex].mana += 10; // Changed from 5 to 10
+    break;
+  }
+  case "KIMCHIS_MALICE": {
+    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
+    players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
+    break;
+  }
+  case "RUNE_TRAP": {
+    if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
+      throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
     }
-    case "KIMCHIS_MALICE": {
-      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for KIMCHIS_MALICE.");
-      players[targetIndex].mana = Math.max(0, players[targetIndex].mana - 15); // Changed from 8 to 15
-      break;
-    }
-    case "RUNE_TRAP": {
-      if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
-        throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for RUNE_TRAP.");
-      }
-      const boardCopy = [...gameData.board];
-      boardCopy[options.tileIndex] = { ...boardCopy[options.tileIndex], trap: { ownerId: uid, spellId: spell.id } }; // Added spellId to trap
-      await gameRef.update({
-        players: players,
-        board: boardCopy,
-        lastSpellCast: { spellId, casterId: uid, options },
-      });
-      // Note: spellsCast was already incremented before the switch.
-      return { success: true }; // Return early as board update is specific
-    }
-    case "MANA_SHIELD": {
-      // Target is self, casterIndex is used.
-      const existingEffects = players[casterIndex].effects || [];
-      const hasShield = existingEffects.some((effect: { type: string }) => effect.type === "SHIELDED");
-      if (!hasShield) {
-        players[casterIndex].effects = [...existingEffects, { type: "SHIELDED", duration: 1, spellId: spell.id }]; // Duration changed to 1
-      } else {
-        players[casterIndex].effects = existingEffects.map((effect: { type: string, duration: number }) =>
-          effect.type === "SHIELDED" ? { ...effect, duration: 1 } : effect // Duration changed to 1
-        );
-      }
-      break;
-    }
-    case "ASTRAL_SWAP": {
-      if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
-      // Validation uid === targetId is already done by general checks if spell.requiresTarget === 'player' and not self-targetable.
-      // const casterPlayer = players[casterIndex]; // Already have `caster`
-      const targetPlayer = players[targetIndex];
-
-      const casterPosition = players[casterIndex].position; // Use players[casterIndex] as `caster` is a copy for mana deduction.
-      const targetPosition = targetPlayer.position;
-
-      players[casterIndex].position = targetPosition;
-      players[targetIndex].position = casterPosition;
-      logger.info(`Astral Swap: ${players[casterIndex].displayName} (${casterPosition}) swapped with ${targetPlayer.displayName} (${targetPosition})`);
-      break;
-    }
-    case "MEMORY_FOG": {
-      // Caster is players[casterIndex]
-      const currentCasterEffects = players[casterIndex].effects || [];
-      // Prevent stacking if already immune via MEMORY_FOG or MANA_SHIELD
-      const existingImmunity = currentCasterEffects.find(
-        (eff: any) => eff.type === "IMMUNE_TO_NEXT_SPELL" || eff.type === "SHIELDED"
+    const boardCopy = [...gameData.board];
+    boardCopy[options.tileIndex] = { ...boardCopy[options.tileIndex], trap: { ownerId: uid, spellId: spell.id } }; // Added spellId to trap
+    await gameRef.update({
+      players: players,
+      board: boardCopy,
+      lastSpellCast: { spellId, casterId: uid, options },
+    });
+    // Note: spellsCast was already incremented before the switch.
+    return { success: true }; // Return early as board update is specific
+  }
+  case "MANA_SHIELD": {
+    // Target is self, casterIndex is used.
+    const existingEffects = players[casterIndex].effects || [];
+    const hasShield = existingEffects.some((effect: { type: string }) => effect.type === "SHIELDED");
+    if (!hasShield) {
+      players[casterIndex].effects = [...existingEffects, { type: "SHIELDED", duration: 1, spellId: spell.id }]; // Duration changed to 1
+    } else {
+      players[casterIndex].effects = existingEffects.map((effect: { type: string, duration: number }) =>
+        effect.type === "SHIELDED" ? { ...effect, duration: 1 } : effect // Duration changed to 1
       );
-      if (!existingImmunity) {
-        players[casterIndex].effects = [
-          ...currentCasterEffects,
-          { type: "IMMUNE_TO_NEXT_SPELL", duration: 1, spellId: spell.id },
-        ];
-        logger.info(`Player ${players[casterIndex].displayName} cast Memory Fog.`);
-      } else {
-        // Optionally, refresh duration if re-cast? For now, no stacking if any immunity exists.
-        logger.info(`Player ${players[casterIndex].displayName} tried to cast Memory Fog but already has an immunity effect.`);
-        // Potentially throw an error or return a specific status if stacking isn't allowed and mana shouldn't be consumed.
-        // For now, mana is consumed, but effect is not re-applied if one exists.
-      }
-      break;
     }
-    case "KARMIC_SWAP": {
-      if (targetIndex === -1 || targetIndex === casterIndex) { // Ensure target is valid and not self
-        throw new HttpsError("invalid-argument", "Valid target player required for Karmic Swap and cannot target self.");
-      }
-      const casterCurrentPosition = players[casterIndex].position;
-      const targetCurrentPosition = players[targetIndex].position;
+    break;
+  }
+  case "ASTRAL_SWAP": {
+    if (targetIndex === -1) throw new HttpsError("invalid-argument", "Target required for ASTRAL_SWAP.");
+    // Validation uid === targetId is already done by general checks if spell.requiresTarget === 'player' and not self-targetable.
+    // const casterPlayer = players[casterIndex]; // Already have `caster`
+    const targetPlayer = players[targetIndex];
 
-      players[casterIndex].position = targetCurrentPosition;
-      players[targetIndex].position = casterCurrentPosition;
-      logger.info(`Karmic Swap: ${players[casterIndex].displayName} (was at ${casterCurrentPosition}) swapped with ${players[targetIndex].displayName} (was at ${targetCurrentPosition})`);
-      break;
-    }
-    case "DOKKAEBI_MISCHIEF": {
-      if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
-        throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for Dokkaebi's Mischief.");
-      }
-      if (gameData.board[options.tileIndex].trap) {
-        throw new HttpsError("failed-precondition", "This tile already has a trap.");
-      }
+    const casterPosition = players[casterIndex].position; // Use players[casterIndex] as `caster` is a copy for mana deduction.
+    const targetPosition = targetPlayer.position;
 
-      const boardCopy = [...gameData.board];
-      boardCopy[options.tileIndex] = {
-        ...boardCopy[options.tileIndex],
-        trap: {
-          ownerId: uid,
-          spellId: spell.id,
-          effectType: "MANA_LOSS", // As per spell definition
-          manaAmount: spell.effectDetails?.manaLoss || 15, // Get from definition, fallback
-        },
-      };
-      logger.info(`Player ${players[casterIndex].displayName} placed Dokkaebi's Mischief on tile ${options.tileIndex}.`);
-      // Update board specifically for trap spells, then players and lastSpellCast in the final update
-      await gameRef.update({
-        board: boardCopy,
-        players: players, // Also save player mana update
-        lastSpellCast: { spellId, casterId: uid, targetId, options },
-      });
-      return { success: true, message: "Dokkaebi's Mischief placed." }; // Return early as board is updated
+    players[casterIndex].position = targetPosition;
+    players[targetIndex].position = casterPosition;
+    logger.info(`Astral Swap: ${players[casterIndex].displayName} (${casterPosition}) swapped with ${targetPlayer.displayName} (${targetPosition})`);
+    break;
+  }
+  case "MEMORY_FOG": {
+    // Caster is players[casterIndex]
+    const currentCasterEffects = players[casterIndex].effects || [];
+    // Prevent stacking if already immune via MEMORY_FOG or MANA_SHIELD
+    const existingImmunity = currentCasterEffects.find(
+      (eff: { type: string; duration: number; spellId?: string }) => eff.type === "IMMUNE_TO_NEXT_SPELL" || eff.type === "SHIELDED"
+    );
+    if (!existingImmunity) {
+      players[casterIndex].effects = [
+        ...currentCasterEffects,
+        { type: "IMMUNE_TO_NEXT_SPELL", duration: 1, spellId: spell.id },
+      ];
+      logger.info(`Player ${players[casterIndex].displayName} cast Memory Fog.`);
+    } else {
+      // Optionally, refresh duration if re-cast? For now, no stacking if any immunity exists.
+      logger.info(`Player ${players[casterIndex].displayName} tried to cast Memory Fog but already has an immunity effect.`);
+      // Potentially throw an error or return a specific status if stacking isn't allowed and mana shouldn't be consumed.
+      // For now, mana is consumed, but effect is not re-applied if one exists.
     }
+    break;
+  }
+  case "KARMIC_SWAP": {
+    if (targetIndex === -1 || targetIndex === casterIndex) { // Ensure target is valid and not self
+      throw new HttpsError("invalid-argument", "Valid target player required for Karmic Swap and cannot target self.");
+    }
+    const casterCurrentPosition = players[casterIndex].position;
+    const targetCurrentPosition = players[targetIndex].position;
+
+    players[casterIndex].position = targetCurrentPosition;
+    players[targetIndex].position = casterCurrentPosition;
+    logger.info(`Karmic Swap: ${players[casterIndex].displayName} (was at ${casterCurrentPosition}) swapped with ${players[targetIndex].displayName} (was at ${targetCurrentPosition})`);
+    break;
+  }
+  case "DOKKAEBI_MISCHIEF": {
+    if (typeof options?.tileIndex !== "number" || options.tileIndex < 0 || options.tileIndex >= gameData.board.length) {
+      throw new HttpsError("invalid-argument", "Valid tileIndex is required in options for Dokkaebi's Mischief.");
+    }
+    if (gameData.board[options.tileIndex].trap) {
+      throw new HttpsError("failed-precondition", "This tile already has a trap.");
+    }
+
+    const boardCopy = [...gameData.board];
+    boardCopy[options.tileIndex] = {
+      ...boardCopy[options.tileIndex],
+      trap: {
+        ownerId: uid,
+        spellId: spell.id,
+        effectType: "MANA_LOSS", // As per spell definition
+        manaAmount: spell.effectDetails?.manaLoss || 15, // Get from definition, fallback
+      },
+    };
+    logger.info(`Player ${players[casterIndex].displayName} placed Dokkaebi's Mischief on tile ${options.tileIndex}.`);
+    // Update board specifically for trap spells, then players and lastSpellCast in the final update
+    await gameRef.update({
+      board: boardCopy,
+      players: players, // Also save player mana update
+      lastSpellCast: { spellId, casterId: uid, targetId, options },
+    });
+    return { success: true, message: "Dokkaebi's Mischief placed." }; // Return early as board is updated
+  }
   }
 
   // Ensure players array reflects changes to caster from mana deduction and potential effects

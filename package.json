@@ -1,16 +1,15 @@
 {
   "name": "functions",
   "scripts": {
-    "lint": "eslint --ext .js,.ts .",
+    "lint": "eslint --ext .js,.ts src",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
-    "test": "npm run build && firebase emulators:exec --only firestore \"jest --testTimeout=60000\"",
+    "test": "npm run build && firebase emulators:exec --project firestore-emulator-example --only firestore,functions,auth \"env FIREBASE_AUTH_EMULATOR_HOST='localhost:9099' FIRESTORE_EMULATOR_HOST='localhost:8080' FUNCTIONS_EMULATOR_HOST='localhost:5001' mocha -t 10000 --require ts-node/register test/**/*.test.ts\"",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log",
-    "test": "npm run build && firebase emulators:exec --project firestore-emulator-example --only firestore,functions,auth \"env FIREBASE_AUTH_EMULATOR_HOST='localhost:9099' FIRESTORE_EMULATOR_HOST='localhost:8080' FUNCTIONS_EMULATOR_HOST='localhost:5001' mocha -t 10000 --require ts-node/register test/**/*.test.ts\""
+    "logs": "firebase functions:log"
   },
   "engines": {
     "node": "18"
@@ -19,13 +18,14 @@
   "dependencies": {
     "firebase": "^11.9.1",
     "firebase-admin": "^12.1.0",
-    "firebase-functions": "6.3.2"
+    "firebase-functions": "6.3.2",
+    "nodemailer": "^7.0.3"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
     "@types/chai": "^5.2.2",
-    "@types/mocha": "^10.0.10",
     "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
     "chai": "^5.2.0",
@@ -33,10 +33,10 @@
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.29.1",
     "firebase-tools": "^14.8.0",
-    "mocha": "^11.7.0",
-    "ts-node": "^10.9.2",
     "jest": "^30.0.2",
+    "mocha": "^11.7.0",
     "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },
   "private": true

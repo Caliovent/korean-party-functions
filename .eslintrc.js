@@ -19,7 +19,9 @@ module.exports = {
     tsconfigRootDir: __dirname, // Dit à ESLint de chercher tsconfig.json ici
   },
   ignorePatterns: [
-    "/lib/**/*", // Ignore les fichiers JavaScript compilés
+    "functions/lib/**/*", // Ignore les fichiers compilés dans le dossier lib
+    "lib/**/*", // Ignore les fichiers JavaScript compilés
+    "jest.config.js",
   ],
   plugins: [
     "@typescript-eslint",

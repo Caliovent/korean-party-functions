@@ -1,9 +1,9 @@
 {
   "functions": [
     {
-      "source": "lib", // Répertoire des fonctions compilées
+      "source": "lib",
       "codebase": "default",
-      "runtime": "nodejs18", // Spécifier le moteur d'exécution
+      "runtime": "nodejs18",
       "ignore": [
         "node_modules",
         ".git",
@@ -11,8 +11,8 @@
         "firestore-debug.log"
       ],
       "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR/../\" run lint", // Ajuster le chemin si package.json n'est pas dans functions/
-        "npm --prefix \"$RESOURCE_DIR/../\" run build"  // Ajuster le chemin si package.json n'est pas dans functions/
+        "npm run lint --prefix functions",
+        "npm run build --prefix functions"
       ]
     }
   ],

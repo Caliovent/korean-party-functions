@@ -20,8 +20,12 @@ interface SpellDefinition {
   manaCost: number;
   type: "TERRAIN" | "DEFENSIVE" | "STRATEGIC" | "OFFENSIVE" | "CHAOS" | "TRAP";
   description: string;
-  requiresTarget?: 'player' | 'tile'; // Added for spells needing specific targets
-  effectDetails?: Record<string, any>; // Added for specific effect parameters
+  requiresTarget?: "player" | "tile"; // Added for spells needing specific targets
+  effectDetails?: {
+    manaLoss?: number;
+    duration?: number;
+    // Add other possible effect detail properties here as needed
+  }; // Added for specific effect parameters
 }
 
 export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
@@ -32,7 +36,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     manaCost: 15,
     type: "OFFENSIVE",
     description: "Grants a small amount of mana to the target.",
-    requiresTarget: 'player', // Assuming it targets another player or self
+    requiresTarget: "player", // Assuming it targets another player or self
   },
   KIMCHIS_MALICE: {
     id: "KIMCHIS_MALICE",
@@ -40,7 +44,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     manaCost: 20,
     type: "OFFENSIVE",
     description: "Reduces the target's mana.",
-    requiresTarget: 'player', // Assuming it targets another player
+    requiresTarget: "player", // Assuming it targets another player
   },
   RUNE_TRAP: {
     id: "RUNE_TRAP",
@@ -48,7 +52,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     manaCost: 35,
     type: "TRAP", // Changed from TERRAIN to TRAP for consistency with new spell type
     description: "Pose un piège sur une case. Le prochain joueur à s'y arrêter perd 50 Mana.",
-    requiresTarget: 'tile',
+    requiresTarget: "tile",
     effectDetails: { manaLoss: 50 }, // Added for clarity on effect
   },
   MANA_SHIELD: {
@@ -65,7 +69,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     manaCost: 90, // Mission doc for Karmic Swap is 40. Keeping existing.
     type: "STRATEGIC", // Could be CHAOS if that's the desired categorization
     description: "Échangez votre position avec celle d'un autre joueur.",
-    requiresTarget: 'player',
+    requiresTarget: "player",
   },
 
   // New Spells as per Mission "Art de l'Enchantement"
@@ -83,7 +87,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     manaCost: 40,
     type: "CHAOS",
     description: "Échangez votre position sur le plateau avec un autre joueur.",
-    requiresTarget: 'player',
+    requiresTarget: "player",
   },
   DOKKAEBI_MISCHIEF: {
     id: "DOKKAEBI_MISCHIEF",
@@ -91,7 +95,7 @@ export const SPELL_DEFINITIONS: Record<SpellId, SpellDefinition> = {
     manaCost: 30,
     type: "TRAP",
     description: "Placez un piège invisible sur une case. Le prochain joueur à s'y arrêter perd 15 Mana.",
-    requiresTarget: 'tile',
+    requiresTarget: "tile",
     effectDetails: { manaLoss: 15 },
   },
 };
