@@ -1,0 +1,11 @@
+{
+  "rewards": [
+    { "day": 1, "reward": { "type": "mana", "amount": 50 } },
+    { "day": 2, "reward": { "type": "mana", "amount": 100 } },
+    { "day": 3, "reward": { "type": "mana", "amount": 150 } },
+    { "day": 4, "reward": { "type": "experience", "amount": 100 } },
+    { "day": 5, "reward": { "type": "mana", "amount": 250 } },
+    { "day": 6, "reward": { "type": "experience", "amount": 200 } },
+    { "day": 7, "reward": { "type": "moonShards", "amount": 10 } }
+  ]
+}
