@@ -1665,6 +1665,40 @@ export const resolveTileAction = onCall({ cors: true }, async (request: function
       //   tileEffectApplied = true;
       //   break;
       // other existing tile types
+    case "FOOD_FEAST_CHALLENGE":
+      tileEffectApplied = true;
+      await gameRef.update({
+        status: "MINI_GAME_STARTING",
+        currentMiniGame: "FOOD_FEAST",
+        miniGameInitiatorId: currentPlayer.uid,
+        players: players, // Ensure player data (e.g. mana from previous steps) is saved
+        // turnState should remain RESOLVING_TILE or be handled by mini-game flow
+      });
+      // IMPORTANT: The game flow might need to pause here and not proceed to next player
+      // For now, assuming the client will handle the transition and further actions.
+      // If the mini-game itself resolves the turn, this function might need to return early.
+      logger.info(`Player ${currentPlayer.uid} landed on FOOD_FEAST_CHALLENGE. Game status updated.`);
+      return { success: true, effect: "MINI_GAME_FOOD_FEAST_STARTING" }; // Return early
+    case "DOKKAEBI_CHALLENGE":
+      tileEffectApplied = true;
+      await gameRef.update({
+        status: "MINI_GAME_STARTING",
+        currentMiniGame: "DOKKAEBI_SAYS", // As per mission brief example
+        miniGameInitiatorId: currentPlayer.uid,
+        players: players,
+      });
+      logger.info(`Player ${currentPlayer.uid} landed on DOKKAEBI_CHALLENGE. Game status updated.`);
+      return { success: true, effect: "MINI_GAME_DOKKAEBI_SAYS_STARTING" }; // Return early
+    case "POEM_CHALLENGE":
+      tileEffectApplied = true;
+      await gameRef.update({
+        status: "MINI_GAME_STARTING",
+        currentMiniGame: "POEM_CHALLENGE",
+        miniGameInitiatorId: currentPlayer.uid,
+        players: players,
+      });
+      logger.info(`Player ${currentPlayer.uid} landed on POEM_CHALLENGE. Game status updated.`);
+      return { success: true, effect: "MINI_GAME_POEM_CHALLENGE_STARTING" }; // Return early
     }
   }
 

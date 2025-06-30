@@ -48,7 +48,7 @@ export interface Grimoire {
 
 // Définition d'une case de jeu
 export interface Tile {
-  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ" | "event"; // Added "event" type
+  type: "MANA_GAIN" | "SAFE_ZONE" | "MINI_GAME_QUIZ" | "event" | "FOOD_FEAST_CHALLENGE" | "DOKKAEBI_CHALLENGE" | "POEM_CHALLENGE"; // Added "event" type and new mini-game types
   trap?: { // Added for RUNE_TRAP
     ownerId: string;
     spellId: SpellId; // To identify the trap type if multiple trap spells exist
