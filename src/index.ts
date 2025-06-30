@@ -2240,7 +2240,6 @@ export const castSpell = onCall({ cors: true }, async (request: functions.https.
 });
 
 
-
 interface UserDoc {
   moonShards: number;
   ownedCosmetics: string[];

@@ -20,9 +20,12 @@ export const PLAYERS_COLLECTION = "players";
 // --- Interfaces ---
 export interface ActionVerbDefinition {
   id?: string;
+  englishTranslation: string;
+  frenchTranslation: string;
+  targetNoun: string;
+  type: "action" | "state"; // Assuming verbs can be actions or states
   verb: string;
-  imperative: string;
-  target: string;
+  imperative: string; // The command form of the verb
 }
 
 export interface GetDokkaebiGameDataRequest {
@@ -77,7 +80,7 @@ export const getDokkaebiGameDataLogic = async (
     throw new Error("No verb definitions found. Please populate 'actionVerbDefinitions'.");
   }
 
-  const allVerbs: ActionVerbDefinition[] = verbDocsSnapshot.docs.map(doc => ({
+  const allVerbs: ActionVerbDefinition[] = verbDocsSnapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data() as ActionVerbDefinition,
   }));
@@ -95,7 +98,7 @@ export const getDokkaebiGameDataLogic = async (
   let isSimonSaysRoundMode = false;
   // For test scenario 1 (level 1), isSimonSays is strictly false.
   if (level === 1) {
-      isSimonSaysRoundMode = false;
+    isSimonSaysRoundMode = false;
   } else {
     // For levels > 1, apply probability.
     // STRETCH GOAL/REFINEMENT: Probability could increase with level.
@@ -116,22 +119,22 @@ export const getDokkaebiGameDataLogic = async (
     // STRETCH GOAL/REFINEMENT: Probability of using prefix (trap severity) could also be level-dependent.
     // For now, using a flat 50% chance to include the prefix if it's a Simon Says round.
     if (Math.random() < 0.5) {
-        commandText = SIMON_SAYS_PREFIX + selectedVerbDef.imperative;
-        // simonSaysPrefixActuallyUsedInCommand would have been true here
+      commandText = SIMON_SAYS_PREFIX + selectedVerbDef.imperative;
+      // simonSaysPrefixActuallyUsedInCommand would have been true here
     } else {
-        // It's a Simon Says round, but we don't use the prefix (trap!)
-        // commandText remains selectedVerbDef.imperative
-        // simonSaysPrefixActuallyUsedInCommand would have been false here
+      // It's a Simon Says round, but we don't use the prefix (trap!)
+      // commandText remains selectedVerbDef.imperative
+      // simonSaysPrefixActuallyUsedInCommand would have been false here
     }
   }
   // If not a Simon Says round (isSimonSaysRoundMode is false),
   // commandText is just selectedVerbDef.imperative.
 
   // 4. Generate actionOptions
-  const actionOptions: string[] = [selectedVerbDef.target];
+  const actionOptions: string[] = [selectedVerbDef.targetNoun];
   const distractorTargets = allVerbs
-    .map(v => v.target)
-    .filter(t => t !== selectedVerbDef.target);
+    .map((v) => v.targetNoun)
+    .filter((t) => t !== selectedVerbDef.targetNoun);
 
   // Shuffle unique distractor targets
   const uniqueDistractorTargets = Array.from(new Set(distractorTargets));
@@ -144,8 +147,8 @@ export const getDokkaebiGameDataLogic = async (
   for (let i = 0; i < uniqueDistractorTargets.length && actionOptions.length < 4; i++) {
     actionOptions.push(uniqueDistractorTargets[i]);
   }
-   // Shuffle the final action options so the correct answer isn't always first
-   for (let i = actionOptions.length - 1; i > 0; i--) {
+  // Shuffle the final action options so the correct answer isn't always first
+  for (let i = actionOptions.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [actionOptions[i], actionOptions[j]] = [actionOptions[j], actionOptions[i]];
   }
@@ -153,7 +156,7 @@ export const getDokkaebiGameDataLogic = async (
   return {
     commandText: commandText,
     commandAudio: `${selectedVerbDef.imperative}.mp3`, // Placeholder audio
-    correctTarget: selectedVerbDef.target,
+    correctTarget: selectedVerbDef.targetNoun,
     actionOptions: actionOptions,
     isSimonSays: isSimonSaysRoundMode, // The mode of the round
     coreImperativeForSubmit: selectedVerbDef.imperative,
@@ -168,7 +171,7 @@ export const submitDokkaebiGameResultsLogic = async (
     command: coreImperative, // e.g. "자!"
     clickedTarget,
     isSimonSays: isSimonSaysRoundMode, // Mode of the round
-    simonSaysConditionMet // Prefix was in command text
+    simonSaysConditionMet, // Prefix was in command text
   } = request;
 
   let score = 0;
@@ -190,7 +193,7 @@ export const submitDokkaebiGameResultsLogic = async (
     throw new Error(`Verb definition not found for imperative: ${coreImperative}`);
   }
   const verbDef = verbDefsSnapshot.docs[0].data() as ActionVerbDefinition;
-  const correctTargetForCommand = verbDef.target;
+  const correctTargetForCommand = verbDef.targetNoun;
 
   // --- Validation Logic ---
   const playerActed = !!clickedTarget; // Player clicked something
@@ -226,14 +229,14 @@ export const submitDokkaebiGameResultsLogic = async (
       resultStatus = "success";
       score = 100; // Scenario 2 score
       message = "Correct action!";
-    } else if (playerActed && clickedTarget !== correctTargetForCommand){
+    } else if (playerActed && clickedTarget !== correctTargetForCommand) {
       resultStatus = "failure";
       score = -25; // Penalty for wrong action
       message = "Wrong target!";
     } else { // Did not act, but should have
-        resultStatus = "failure";
-        score = -30; // Penalty for not acting (adjust as needed)
-        message = "You need to act on the command!";
+      resultStatus = "failure";
+      score = -30; // Penalty for not acting (adjust as needed)
+      message = "You need to act on the command!";
     }
   }
 
@@ -254,7 +257,10 @@ export const submitDokkaebiGameResultsLogic = async (
       const currentMana = playerData.mana || 0;
       const currentVerbsMastered = playerData.stats?.verbsMastered || 0;
 
-      const updateData: { mana: FirebaseFirestore.FieldValue, stats?: { verbsMastered?: FirebaseFirestore.FieldValue } } = {
+      const updateData: {
+        mana: FirebaseFirestore.FieldValue,
+        stats?: { verbsMastered?: FirebaseFirestore.FieldValue }
+      } = {
         mana: admin.firestore.FieldValue.increment(score),
       };
 
@@ -262,7 +268,7 @@ export const submitDokkaebiGameResultsLogic = async (
 
       if (resultStatus === "success" && score > 0) { // Only increment verbsMastered on positive success
         updateData.stats = {
-          verbsMastered: admin.firestore.FieldValue.increment(1)
+          verbsMastered: admin.firestore.FieldValue.increment(1),
         };
         finalNewVerbsMastered = currentVerbsMastered + 1;
       } else {
@@ -276,9 +282,8 @@ export const submitDokkaebiGameResultsLogic = async (
       score,
       message,
       newMana: finalNewMana,
-      newVerbsMastered: finalNewVerbsMastered
+      newVerbsMastered: finalNewVerbsMastered,
     };
-
   } catch (error) {
     console.error("Transaction failed or player not found:", error);
     // Fallback response or re-throw, depending on desired error handling
@@ -289,9 +294,9 @@ export const submitDokkaebiGameResultsLogic = async (
     // So, the primary return should be { result, score, message }
     // If error is specific to player not found, we might customize.
     if (error instanceof Error && error.message.includes("Player profile not found")) {
-        return { result: "failure", score: 0, message: error.message };
+      return { result: "failure", score: 0, message: error.message };
     } // Otherwise, rethrow or handle generally
-    return { result: "failure", score: 0, message: "Database update failed."}; // Generic error for now
+    return { result: "failure", score: 0, message: "Database update failed." }; // Generic error for now
   }
 };
 

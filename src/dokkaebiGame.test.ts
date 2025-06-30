@@ -11,14 +11,14 @@ if (admin.apps.length === 0) {
 const db = admin.firestore();
 
 import {
-    getDokkaebiGameDataLogic,
-    ActionVerbDefinition,
-    ACTION_VERB_DEFINITIONS_COLLECTION,
-    // DokkaebiGameDataResponse, // Already used as return type for getDokkaebiGameDataLogic
-    // GetDokkaebiGameDataRequest, // Removed unused import
-    submitDokkaebiGameResultsLogic,
-    SubmitDokkaebiGameResultsRequest,
-    PlayerProfile as ActualPlayerProfile
+  getDokkaebiGameDataLogic,
+  ActionVerbDefinition,
+  ACTION_VERB_DEFINITIONS_COLLECTION,
+  // DokkaebiGameDataResponse, // Already used as return type for getDokkaebiGameDataLogic
+  // GetDokkaebiGameDataRequest, // Removed unused import
+  submitDokkaebiGameResultsLogic,
+  SubmitDokkaebiGameResultsRequest,
+  PlayerProfile as ActualPlayerProfile,
 } from "./dokkaebiGame"; // Import the actual logic
 
 // --- Interfaces (local to test, or could be shared if identical) ---
@@ -32,25 +32,25 @@ const VERBS_COLLECTION_FOR_TESTS = ACTION_VERB_DEFINITIONS_COLLECTION;
 
 /**
  * Sets up action verb definitions in Firestore for testing.
- * @param verbs An array of ActionVerbDefinition objects to set up.
+ * @param {ActionVerbDefinition[]} verbs An array of ActionVerbDefinition objects to set up.
  */
 async function setupActionVerbDefinitions(
-    verbs: ActionVerbDefinition[]
+  verbs: ActionVerbDefinition[]
 ): Promise<void> {
   const batch = db.batch();
   const collectionRef = db.collection(VERBS_COLLECTION_FOR_TESTS);
 
   // Clear existing verbs first
   const snapshot = await collectionRef.get();
-  snapshot.docs.forEach(doc => batch.delete(doc.ref));
+  snapshot.docs.forEach((doc) => batch.delete(doc.ref));
 
-  verbs.forEach(verbDef => {
+  verbs.forEach((verbDef) => {
     // Use verb as ID, or let Firestore auto-generate. For test predictability, using verb.
     const docRef = collectionRef.doc(verbDef.verb);
     batch.set(docRef, verbDef);
   });
   await batch.commit();
-  console.log(`Test ActionVerbDefinitions set up: ${verbs.map(v => v.verb).join(", ")}`);
+  console.log(`Test ActionVerbDefinitions set up: ${verbs.map((v) => v.verb).join(", ")}`);
 }
 
 // --- Test Suite ---
@@ -60,7 +60,7 @@ describe("Dokkaebi Minigame Backend", () => {
       // Clean up verbs after each test
       const snapshot = await db.collection(VERBS_COLLECTION_FOR_TESTS).get();
       const batch = db.batch();
-      snapshot.docs.forEach(doc => batch.delete(doc.ref));
+      snapshot.docs.forEach((doc) => batch.delete(doc.ref));
       await batch.commit();
     });
 
@@ -68,10 +68,38 @@ describe("Dokkaebi Minigame Backend", () => {
       // Arrange
       // Assuming ActionVerbDefinition is the correct type instead of DokkaebiVerb
       const verbsToSetup: ActionVerbDefinition[] = [
-        { verb: "자다", englishTranslation: "to sleep", frenchTranslation: "dormir", targetNoun: "lit", type: "action" },
-        { verb: "먹다", englishTranslation: "to eat", frenchTranslation: "manger", targetNoun: "nourriture", type: "action" },
-        { verb: "마시다", englishTranslation: "to drink", frenchTranslation: "boire", targetNoun: "boisson", type: "action" },
-        { verb: "보다", englishTranslation: "to see", frenchTranslation: "voir", targetNoun: "télévision", type: "action" },
+        {
+          verb: "자다",
+          englishTranslation: "to sleep",
+          frenchTranslation: "dormir",
+          targetNoun: "lit",
+          type: "action",
+          imperative: "자!",
+        }, // Added imperative for clarity
+        {
+          verb: "먹다",
+          englishTranslation: "to eat",
+          frenchTranslation: "manger",
+          targetNoun: "nourriture",
+          type: "action",
+          imperative: "먹어!", // Added imperative for clarity
+        },
+        {
+          verb: "마시다",
+          englishTranslation: "to drink",
+          frenchTranslation: "boire",
+          targetNoun: "boisson",
+          type: "action",
+          imperative: "마셔!", // Added imperative for clarity
+        },
+        {
+          verb: "보다",
+          englishTranslation: "to see",
+          frenchTranslation: "voir",
+          targetNoun: "télévision",
+          type: "action",
+          imperative: "봐!", // Added imperative for clarity
+        },
       ];
       await setupActionVerbDefinitions(verbsToSetup);
 
@@ -87,7 +115,7 @@ describe("Dokkaebi Minigame Backend", () => {
       expect(gameData.commandAudio).toEqual(expect.any(String)); // Should be a string (URL or identifier)
       expect(gameData.commandAudio).not.toBe("");
 
-      const expectedTargets = verbsToSetup.map(v => v.targetNoun); // Changed from v.translation
+      const expectedTargets = verbsToSetup.map((v) => v.targetNoun); // Changed from v.translation
       expect(expectedTargets).toContain(gameData.correctTarget);
 
       expect(gameData.actionOptions).toBeInstanceOf(Array);
@@ -117,8 +145,8 @@ describe("Dokkaebi Minigame Backend", () => {
 
     /**
      * Sets up a player profile in Firestore for testing.
-     * @param playerId The ID of the player.
-     * @param initialProfileData Partial data for the player's profile.
+     * @param {string} playerId The ID of the player.
+     * @param {Partial<ActualPlayerProfile>} initialProfileData Partial data for the player's profile.
      */
     async function setupPlayerProfile(
       playerId: string,
@@ -136,8 +164,8 @@ describe("Dokkaebi Minigame Backend", () => {
 
     /**
      * Retrieves a player profile from Firestore.
-     * @param playerId The ID of the player.
-     * @returns The player's profile data or null if not found.
+     * @param {string} playerId The ID of the player.
+     * @return {Promise<ActualPlayerProfile | null>} The player's profile data or null if not found.
      */
     async function getPlayerProfile(
       playerId: string
@@ -153,7 +181,7 @@ describe("Dokkaebi Minigame Backend", () => {
       // This is a simple cleanup; more specific cleanup might be needed if UIDs are dynamic.
       const snapshot = await db.collection(PLAYER_COLLECTION).get();
       const batch = db.batch();
-      snapshot.docs.forEach(doc => {
+      snapshot.docs.forEach((doc) => {
         // Example: only delete test players if they follow a pattern
         if (doc.id.startsWith("test-player-")) {
           batch.delete(doc.ref);
@@ -178,6 +206,7 @@ describe("Dokkaebi Minigame Backend", () => {
         command: "자!",
         clickedTarget: "lit", // Assuming "자!" corresponds to "lit"
         isSimonSays: false,
+        simonSaysConditionMet: false, // Added to satisfy interface
       };
 
       // Act
