@@ -10,59 +10,48 @@ if (admin.apps.length === 0) {
 
 const db = admin.firestore();
 
-// --- Interfaces (will likely be defined in a shared types.ts later) ---
-interface DokkaebiVerb {
-  korean: string;
-  translation: string; // e.g., "lit" for "자다" (action target)
-  // any other relevant fields
-}
+import {
+    getDokkaebiGameDataLogic,
+    ActionVerbDefinition,
+    ACTION_VERB_DEFINITIONS_COLLECTION,
+    // DokkaebiGameDataResponse, // Already used as return type for getDokkaebiGameDataLogic
+    GetDokkaebiGameDataRequest
+} from "./dokkaebiGame"; // Import the actual logic
 
-interface DokkaebiGameData {
-  commandText: string; // e.g., "자!"
-  commandAudio: string; // URL or identifier for audio
-  correctTarget: string; // e.g., "lit"
-  actionOptions: string[]; // e.g., ["lit", "nourriture", "bureau", "porte"]
-  isSimonSays: boolean;
-}
-
-interface GetDokkaebiGameDataRequest {
-  level: number;
-  // Potentially playerId if personalization is needed
-}
-
-// --- Placeholder for the actual Cloud Function logic ---
-// This function doesn't exist yet, so tests calling it will fail.
-const getDokkaebiGameDataLogic = async (
-  _request: GetDokkaebiGameDataRequest
-): Promise<DokkaebiGameData> => {
-  throw new Error("getDokkaebiGameDataLogic not implemented");
-};
+// --- Interfaces (local to test, or could be shared if identical) ---
+// ActionVerbDefinition is imported
+// DokkaebiGameDataResponse is effectively the return type of getDokkaebiGameDataLogic
+// GetDokkaebiGameDataRequest is imported
+import { submitDokkaebiGameResultsLogic, SubmitDokkaebiGameResultsRequest, PlayerProfile as ActualPlayerProfile } from "./dokkaebiGame";
 
 // --- Test Helper Functions ---
-const VERBS_COLLECTION = "minigames/dokkaebi/verbs";
+// const VERBS_COLLECTION = "minigames/dokkaebi/verbs"; // Old collection
+const VERBS_COLLECTION_FOR_TESTS = ACTION_VERB_DEFINITIONS_COLLECTION; // Use the actual collection name
 
-async function setupDokkaebiVerbs(verbs: DokkaebiVerb[]): Promise<void> {
+// Updated setup function to match ActionVerbDefinition structure
+async function setupActionVerbDefinitions(verbs: ActionVerbDefinition[]): Promise<void> {
   const batch = db.batch();
-  const collectionRef = db.collection(VERBS_COLLECTION);
+  const collectionRef = db.collection(VERBS_COLLECTION_FOR_TESTS);
 
-  // Clear existing verbs first to ensure a clean state for the test
+  // Clear existing verbs first
   const snapshot = await collectionRef.get();
   snapshot.docs.forEach(doc => batch.delete(doc.ref));
 
-  verbs.forEach(verb => {
-    const docRef = collectionRef.doc(verb.korean); // Use Korean word as ID for simplicity
-    batch.set(docRef, verb);
+  verbs.forEach(verbDef => {
+    // Use verb as ID, or let Firestore auto-generate. For test predictability, using verb.
+    const docRef = collectionRef.doc(verbDef.verb);
+    batch.set(docRef, verbDef);
   });
   await batch.commit();
-  console.log(`Dokkaebi verbs set up in emulator: ${verbs.map(v => v.korean).join(", ")}`);
+  console.log(`Test ActionVerbDefinitions set up: ${verbs.map(v => v.verb).join(", ")}`);
 }
 
 // --- Test Suite ---
 describe("Dokkaebi Minigame Backend", () => {
-  describe("getDokkaebiGameData", () => {
+  describe("getDokkaebiGameDataLogic", () => { // Changed describe to match function name
     afterEach(async () => {
-      // Clean up verbs after each test in this describe block
-      const snapshot = await db.collection(VERBS_COLLECTION).get();
+      // Clean up verbs after each test
+      const snapshot = await db.collection(VERBS_COLLECTION_FOR_TESTS).get();
       const batch = db.batch();
       snapshot.docs.forEach(doc => batch.delete(doc.ref));
       await batch.commit();
@@ -104,56 +93,37 @@ describe("Dokkaebi Minigame Backend", () => {
   // Scenarios 2 and 3 will be added here later
 
   describe("submitDokkaebiGameResults", () => {
-    // Player data structure (simplified for tests)
-    interface PlayerProfile {
-      uid: string;
-      mana: number;
-      stats: {
-        verbsMastered?: number; // For incrementing
-        [key: string]: any;
-      };
-      // other player fields
-    }
+    // Player data structure (simplified for tests) - Now using ActualPlayerProfile from dokkaebiGame.ts
+    // interface PlayerProfile { ... } // Removed, will use ActualPlayerProfile
 
-    interface SubmitDokkaebiGameResultsRequest {
-      playerId: string;
-      command: string; // e.g., "자!"
-      clickedTarget: string; // e.g., "lit"
-      isSimonSays: boolean;
-      simonSaysConditionMet?: boolean; // Relevant for other scenarios
-      // Potentially other fields like reactionTime, gameId, etc.
-    }
+    // SubmitDokkaebiGameResultsRequest is imported from dokkaebiGame.ts
+    // interface SubmitDokkaebiGameResultsRequest { ... } // Removed
 
-    interface DokkaebiGameResultsResponse {
-      result: "success" | "failure";
-      score: number;
-      message?: string;
-    }
+    // DokkaebiGameResultsResponse is the return type of imported submitDokkaebiGameResultsLogic
+    // interface DokkaebiGameResultsResponse { ... } // Removed
 
-    // Placeholder for the actual Cloud Function logic
-    const submitDokkaebiGameResultsLogic = async (
-      _request: SubmitDokkaebiGameResultsRequest
-    ): Promise<DokkaebiGameResultsResponse> => {
-      throw new Error("submitDokkaebiGameResultsLogic not implemented");
-    };
+    // Placeholder removed, actual logic is imported.
+    // const submitDokkaebiGameResultsLogic = async ( ... ) => { ... };
 
-    const PLAYER_COLLECTION = "players";
+    const PLAYER_COLLECTION = "players"; // This constant is also defined in dokkaebiGame.ts
 
-    async function setupPlayerProfile(playerId: string, initialProfileData: Partial<PlayerProfile>): Promise<void> {
+    // Using ActualPlayerProfile for type safety with the imported module
+    async function setupPlayerProfile(playerId: string, initialProfileData: Partial<ActualPlayerProfile>): Promise<void> {
       const playerRef = db.collection(PLAYER_COLLECTION).doc(playerId);
       await playerRef.set({
+        uid: playerId, // Ensure uid is set
         mana: 0,
         stats: { verbsMastered: 0 },
         ...initialProfileData,
-      });
+      } as ActualPlayerProfile); // Cast to ensure all required fields if any
       console.log(`Player profile for ${playerId} set up in emulator.`);
     }
 
-    async function getPlayerProfile(playerId: string): Promise<PlayerProfile | null> {
+    async function getPlayerProfile(playerId: string): Promise<ActualPlayerProfile | null> {
       const playerRef = db.collection(PLAYER_COLLECTION).doc(playerId);
       const doc = await playerRef.get();
       if (!doc.exists) return null;
-      return doc.data() as PlayerProfile;
+      return doc.data() as ActualPlayerProfile;
     }
 
     afterEach(async () => {
