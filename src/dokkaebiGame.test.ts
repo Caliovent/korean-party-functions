@@ -15,21 +15,28 @@ import {
     ActionVerbDefinition,
     ACTION_VERB_DEFINITIONS_COLLECTION,
     // DokkaebiGameDataResponse, // Already used as return type for getDokkaebiGameDataLogic
-    GetDokkaebiGameDataRequest
+    // GetDokkaebiGameDataRequest, // Removed unused import
+    submitDokkaebiGameResultsLogic,
+    SubmitDokkaebiGameResultsRequest,
+    PlayerProfile as ActualPlayerProfile
 } from "./dokkaebiGame"; // Import the actual logic
 
 // --- Interfaces (local to test, or could be shared if identical) ---
 // ActionVerbDefinition is imported
 // DokkaebiGameDataResponse is effectively the return type of getDokkaebiGameDataLogic
-// GetDokkaebiGameDataRequest is imported
-import { submitDokkaebiGameResultsLogic, SubmitDokkaebiGameResultsRequest, PlayerProfile as ActualPlayerProfile } from "./dokkaebiGame";
 
 // --- Test Helper Functions ---
 // const VERBS_COLLECTION = "minigames/dokkaebi/verbs"; // Old collection
-const VERBS_COLLECTION_FOR_TESTS = ACTION_VERB_DEFINITIONS_COLLECTION; // Use the actual collection name
+// Use the actual collection name
+const VERBS_COLLECTION_FOR_TESTS = ACTION_VERB_DEFINITIONS_COLLECTION;
 
-// Updated setup function to match ActionVerbDefinition structure
-async function setupActionVerbDefinitions(verbs: ActionVerbDefinition[]): Promise<void> {
+/**
+ * Sets up action verb definitions in Firestore for testing.
+ * @param verbs An array of ActionVerbDefinition objects to set up.
+ */
+async function setupActionVerbDefinitions(
+    verbs: ActionVerbDefinition[]
+): Promise<void> {
   const batch = db.batch();
   const collectionRef = db.collection(VERBS_COLLECTION_FOR_TESTS);
 
@@ -59,13 +66,14 @@ describe("Dokkaebi Minigame Backend", () => {
 
     test("should return a clear order and a list of possible actions for level 1", async () => {
       // Arrange
-      const verbsToSetup: DokkaebiVerb[] = [
-        { korean: "자다", translation: "lit" },
-        { korean: "먹다", translation: "nourriture" },
-        { korean: "마시다", translation: "boisson" },
-        { korean: "보다", translation: "télévision" },
+      // Assuming ActionVerbDefinition is the correct type instead of DokkaebiVerb
+      const verbsToSetup: ActionVerbDefinition[] = [
+        { verb: "자다", englishTranslation: "to sleep", frenchTranslation: "dormir", targetNoun: "lit", type: "action" },
+        { verb: "먹다", englishTranslation: "to eat", frenchTranslation: "manger", targetNoun: "nourriture", type: "action" },
+        { verb: "마시다", englishTranslation: "to drink", frenchTranslation: "boire", targetNoun: "boisson", type: "action" },
+        { verb: "보다", englishTranslation: "to see", frenchTranslation: "voir", targetNoun: "télévision", type: "action" },
       ];
-      await setupDokkaebiVerbs(verbsToSetup);
+      await setupActionVerbDefinitions(verbsToSetup);
 
       // Act
       // This function is expected to be defined in the actual Cloud Functions code.
@@ -79,7 +87,7 @@ describe("Dokkaebi Minigame Backend", () => {
       expect(gameData.commandAudio).toEqual(expect.any(String)); // Should be a string (URL or identifier)
       expect(gameData.commandAudio).not.toBe("");
 
-      const expectedTargets = verbsToSetup.map(v => v.translation);
+      const expectedTargets = verbsToSetup.map(v => v.targetNoun); // Changed from v.translation
       expect(expectedTargets).toContain(gameData.correctTarget);
 
       expect(gameData.actionOptions).toBeInstanceOf(Array);
@@ -107,8 +115,15 @@ describe("Dokkaebi Minigame Backend", () => {
 
     const PLAYER_COLLECTION = "players"; // This constant is also defined in dokkaebiGame.ts
 
-    // Using ActualPlayerProfile for type safety with the imported module
-    async function setupPlayerProfile(playerId: string, initialProfileData: Partial<ActualPlayerProfile>): Promise<void> {
+    /**
+     * Sets up a player profile in Firestore for testing.
+     * @param playerId The ID of the player.
+     * @param initialProfileData Partial data for the player's profile.
+     */
+    async function setupPlayerProfile(
+      playerId: string,
+      initialProfileData: Partial<ActualPlayerProfile>
+    ): Promise<void> {
       const playerRef = db.collection(PLAYER_COLLECTION).doc(playerId);
       await playerRef.set({
         uid: playerId, // Ensure uid is set
@@ -119,7 +134,14 @@ describe("Dokkaebi Minigame Backend", () => {
       console.log(`Player profile for ${playerId} set up in emulator.`);
     }
 
-    async function getPlayerProfile(playerId: string): Promise<ActualPlayerProfile | null> {
+    /**
+     * Retrieves a player profile from Firestore.
+     * @param playerId The ID of the player.
+     * @returns The player's profile data or null if not found.
+     */
+    async function getPlayerProfile(
+      playerId: string
+    ): Promise<ActualPlayerProfile | null> {
       const playerRef = db.collection(PLAYER_COLLECTION).doc(playerId);
       const doc = await playerRef.get();
       if (!doc.exists) return null;
