@@ -60,7 +60,7 @@ export interface PlayerProfile {
   mana: number;
   stats: {
     verbsMastered?: number;
-    [key: string]: any;
+    [key: string]: number | string | boolean | undefined; // More specific than any
   };
 }
 
@@ -73,7 +73,8 @@ export const getDokkaebiGameDataLogic = async (
 
   const verbDocsSnapshot = await db.collection(ACTION_VERB_DEFINITIONS_COLLECTION).get();
   if (verbDocsSnapshot.empty) {
-    throw new Error("No verb definitions found in the database. Please populate the 'actionVerbDefinitions' collection.");
+    // Shorter error message
+    throw new Error("No verb definitions found. Please populate 'actionVerbDefinitions'.");
   }
 
   const allVerbs: ActionVerbDefinition[] = verbDocsSnapshot.docs.map(doc => ({
@@ -105,9 +106,9 @@ export const getDokkaebiGameDataLogic = async (
 
   // 3. Determine actual commandText (with or without prefix)
   let commandText = selectedVerbDef.imperative;
-  // This variable indicates if the "Dokkaebi dit..." prefix was actually used in the command text.
-  // This is what the client would use to determine `simonSaysConditionMet` for the submission.
-  let simonSaysPrefixActuallyUsedInCommand = false; // Default to false
+  // commandText will be set based on whether the prefix is used.
+  // The client can determine if the prefix was used by checking commandText.startsWith(SIMON_SAYS_PREFIX).
+  // No need for simonSaysPrefixActuallyUsedInCommand variable.
 
   if (isSimonSaysRoundMode) {
     // If it's a Simon Says round, decide whether to actually include the prefix.
@@ -116,18 +117,15 @@ export const getDokkaebiGameDataLogic = async (
     // For now, using a flat 50% chance to include the prefix if it's a Simon Says round.
     if (Math.random() < 0.5) {
         commandText = SIMON_SAYS_PREFIX + selectedVerbDef.imperative;
-        simonSaysPrefixActuallyUsedInCommand = true;
+        // simonSaysPrefixActuallyUsedInCommand would have been true here
     } else {
         // It's a Simon Says round, but we don't use the prefix (trap!)
         // commandText remains selectedVerbDef.imperative
-        simonSaysPrefixActuallyUsedInCommand = false; // Explicitly false
+        // simonSaysPrefixActuallyUsedInCommand would have been false here
     }
   }
   // If not a Simon Says round (isSimonSaysRoundMode is false),
-  // commandText is just selectedVerbDef.imperative, and simonSaysPrefixActuallyUsedInCommand remains false.
-  // If not a Simon Says round (isSimonSaysRoundMode is false),
-  // commandText is just selectedVerbDef.imperative, and simonSaysPrefixActuallyUsedInCommand remains false.
-  // This is consistent with the expectation for `simonSaysConditionMet` in tests.
+  // commandText is just selectedVerbDef.imperative.
 
   // 4. Generate actionOptions
   const actionOptions: string[] = [selectedVerbDef.target];
@@ -177,18 +175,15 @@ export const submitDokkaebiGameResultsLogic = async (
   let resultStatus: "success" | "failure" = "failure";
   let message: string | undefined = undefined;
 
-  // Fetch the verb definition to know the correct target for the given coreImperative
-  const verbDefDoc = await db.collection(ACTION_VERB_DEFINITIONS_COLLECTION).doc(coreImperative).get();
-  // Note: In tests, setupActionVerbDefinitions uses verbDef.verb as ID, so imperative should be the ID.
-  // If ActionVerbDefinition had `id: imperative`, this would work.
-  // Let's assume ActionVerbDefinition doc ID is the `verb` (e.g. "자다"), not imperative.
+  // Fetch the verb definition to know the correct target for the given coreImperative.
   // The `coreImperativeForSubmit` from `getDokkaebiGameDataLogic` is `selectedVerbDef.imperative`.
   // We need to find the ActionVerbDefinition that has this imperative.
-
-  const verbDefsSnapshot = await db.collection(ACTION_VERB_DEFINITIONS_COLLECTION)
-                                   .where("imperative", "==", coreImperative)
-                                   .limit(1)
-                                   .get();
+  // The variable verbDefDoc was unused.
+  const verbDefsSnapshot = await db
+    .collection(ACTION_VERB_DEFINITIONS_COLLECTION)
+    .where("imperative", "==", coreImperative)
+    .limit(1)
+    .get();
 
   if (verbDefsSnapshot.empty) {
     // This should not happen if coreImperative came from a valid game round
@@ -276,7 +271,13 @@ export const submitDokkaebiGameResultsLogic = async (
       transaction.update(playerRef, updateData);
     });
 
-    return { result: resultStatus, score, message, newMana: finalNewMana, newVerbsMastered: finalNewVerbsMastered };
+    return {
+      result: resultStatus,
+      score,
+      message,
+      newMana: finalNewMana,
+      newVerbsMastered: finalNewVerbsMastered
+    };
 
   } catch (error) {
     console.error("Transaction failed or player not found:", error);
