@@ -63,7 +63,8 @@ Le frontend est conçu pour être hautement réactif et découplé de la logique
   "srsData": {
     "WORD_ID_1": { "interval": "number", "easeFactor": "number", "nextReview": "Timestamp" },
     ...
-  }
+  },
+  "languagePreference": "string" // Ex: "fr", "en"
 }
 b. Collection games
 Document identifié par un ID de partie unique.

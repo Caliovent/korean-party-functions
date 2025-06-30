@@ -152,13 +152,31 @@ export const onUserCreate = functionsV1
 
 export const updateUserProfile = onCall({ cors: true }, async (request) => {
   if (!request.auth) throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
-  const { displayName } = request.data;
+  const { displayName, language } = request.data;
   const { uid } = request.auth;
-  if (typeof displayName !== "string" || displayName.length < 3 || displayName.length > 20) {
-    throw new functions.https.HttpsError("invalid-argument", "Le displayName doit contenir entre 3 et 20 caractères.");
+
+  const updateData: { [key: string]: any } = {};
+
+  if (displayName !== undefined) {
+    if (typeof displayName !== "string" || displayName.length < 3 || displayName.length > 20) {
+      throw new functions.https.HttpsError("invalid-argument", "Le displayName doit contenir entre 3 et 20 caractères.");
+    }
+    updateData.displayName = displayName;
   }
-  await admin.firestore().collection("users").doc(uid).update({ displayName });
-  return { status: "succès" };
+
+  if (language !== undefined) {
+    if (typeof language !== "string" || language.length < 2 || language.length > 10) { // Basic validation for language code
+      throw new functions.https.HttpsError("invalid-argument", "La langue fournie est invalide.");
+    }
+    updateData.languagePreference = language;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Aucune donnée à mettre à jour (displayName ou language requis).");
+  }
+
+  await admin.firestore().collection("users").doc(uid).update(updateData);
+  return { status: "succès", updatedFields: Object.keys(updateData) };
 });
 
 // =================================================================
