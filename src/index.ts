@@ -11,10 +11,17 @@ import { getXpForLevel } from "./xpUtils";
 import { Player, Tile, Guild, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse, QuestDefinition, PlayerActiveQuest } from "./types"; // Added QuestDefinition, PlayerActiveQuest
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards } from "./data/eventCards";
+import { SpellMasteryItem } from "./types"; // Added SpellMasteryItem
 
 // Mana Reward Constants
 const MANA_REWARD_MINI_GAME_QUIZ = 20;
 // const MANA_REWARD_HANGEUL_TYPHOON = 40; // Placeholder for future use
+
+// SRS Constants
+const DEFAULT_EASE_FACTOR = 2.5;
+const INITIAL_INTERVAL_DAYS = 1;
+const MAX_MASTERY_LEVEL = 8; // Example max level
+const REVIEW_ITEMS_LIMIT = 20; // Max items to return for review
 
 // Hangeul Typhoon Constants
 const DEFAULT_GROUND_RISE_AMOUNT = 10;
@@ -337,6 +344,96 @@ export const createGuild = onCall({ cors: true }, async (request: functions.http
       throw error;
     }
     throw new HttpsError("internal", "Une erreur interne est survenue lors de la création de la guilde.");
+  }
+});
+
+/**
+ * Updates a spell mastery item based on the user's review performance (correct or incorrect).
+ * Implements an SM-2 like Spaced Repetition System algorithm.
+ */
+export const updateReviewItem = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour mettre à jour une rune.");
+  }
+  const uid = request.auth.uid;
+  const { itemId, isCorrect } = request.data;
+
+  if (typeof itemId !== "string" || itemId.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'ID de l'item (itemId) est manquant ou invalide.");
+  }
+  if (typeof isCorrect !== "boolean") {
+    throw new HttpsError("invalid-argument", "Le statut de la réponse (isCorrect) est manquant ou invalide.");
+  }
+
+  const itemRef = db.collection("users").doc(uid).collection("spellMastery").doc(itemId);
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const itemDoc = await transaction.get(itemRef);
+      if (!itemDoc.exists) {
+        throw new HttpsError("not-found", `L'item de révision avec l'ID ${itemId} n'a pas été trouvé.`);
+      }
+
+      const item = itemDoc.data() as SpellMasteryItem;
+
+      // Initialize fields if they are missing (for items created before SRS fields were added)
+      let masteryLevel = item.masteryLevel || 0;
+      let easeFactor = item.easeFactor || DEFAULT_EASE_FACTOR;
+      let interval = item.interval || 0; // days
+      let reviews = item.reviews || 0;
+      let lapses = item.lapses || 0;
+
+      reviews++;
+
+      if (isCorrect) {
+        if (masteryLevel === 0) { // First time correct, or correct after a lapse
+          interval = INITIAL_INTERVAL_DAYS;
+        } else if (masteryLevel === 1) {
+          interval = Math.ceil(INITIAL_INTERVAL_DAYS * 2.5); // e.g., 2-3 days, SM-2 often suggests 6 days for second interval
+        } else {
+          interval = Math.ceil(interval * easeFactor);
+        }
+        masteryLevel++;
+        if (masteryLevel > MAX_MASTERY_LEVEL) {
+          masteryLevel = MAX_MASTERY_LEVEL;
+        }
+        // SM-2: Ease factor is adjusted based on the quality of response (q).
+        // For simplicity here, if correct, we don't adjust EF aggressively unless q < 3 (hard).
+        // If we assume any "correct" is q >= 3, EF might not change or slightly increase.
+        // Let's keep EF stable on correct, or slightly increase if it was very easy (not implemented here).
+        // A common simplification: EF only decreases on incorrect.
+      } else { // Incorrect
+        lapses++;
+        masteryLevel = 0; // Reset mastery level (or decrease by 1 or more)
+        interval = INITIAL_INTERVAL_DAYS; // Reset interval
+        easeFactor = Math.max(1.3, easeFactor - 0.2); // Decrease easeFactor, but not below 1.3
+      }
+
+      const nextReviewDate = admin.firestore.Timestamp.fromMillis(
+        now.toMillis() + interval * 24 * 60 * 60 * 1000
+      );
+
+      const updateData: Partial<SpellMasteryItem> = {
+        masteryLevel,
+        easeFactor,
+        interval,
+        nextReviewDate,
+        lastReviewedDate: now,
+        reviews,
+        lapses,
+      };
+
+      transaction.update(itemRef, updateData);
+
+      return { success: true, message: `Item ${itemId} mis à jour.`, nextReview: nextReviewDate.toDate().toISOString() };
+    });
+  } catch (error) {
+    logger.error(`Erreur lors de la mise à jour de la rune ${itemId} pour l'utilisateur ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la mise à jour de la rune.");
   }
 });
 
@@ -2443,6 +2540,56 @@ export const purchaseShopItem = functions.https.onCall(async (request) => {
 // [DUPLICATE FUNCTIONS REMOVED]
 // The definitions for leaveGuild, joinGuild, and createGuild using functions.https.onCall (v1 style)
 // that were previously here have been removed to favor the v2 versions defined earlier in the file.
+
+// =================================================================
+//                    FORGE DES SORTS (SRS FUNCTIONS)
+// =================================================================
+
+/**
+ * Retrieves a list of spell mastery items due for review for the authenticated user.
+ */
+export const getReviewItems = onCall({ cors: true }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour récupérer les runes à réviser.");
+  }
+  const uid = request.auth.uid;
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    const spellMasterySnapshot = await db.collection("users").doc(uid).collection("spellMastery")
+      .where("nextReviewDate", "<=", now)
+      .orderBy("nextReviewDate") // Optional: review older items first
+      .limit(REVIEW_ITEMS_LIMIT)
+      .get();
+
+    if (spellMasterySnapshot.empty) {
+      return { items: [] };
+    }
+
+    const reviewItems = spellMasterySnapshot.docs.map((doc) => {
+      const data = doc.data() as SpellMasteryItem;
+      // Return only necessary fields for the frontend to conduct the review session
+      return {
+        id: doc.id,
+        word: data.word,
+        translation: data.translation,
+        // Include other fields if the frontend needs them, e.g.:
+        // romanization: data.romanization,
+        // audioUrl: data.audioUrl,
+        // masteryLevel: data.masteryLevel, // Could be useful for display
+      };
+    });
+
+    return { items: reviewItems };
+  } catch (error) {
+    logger.error(`Erreur lors de la récupération des runes à réviser pour l'utilisateur ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la récupération des runes à réviser.");
+  }
+});
+
 
 // Potentiellement d'autres fonctions ici...
 // export const anotherFunction = functions.https.onRequest(...)

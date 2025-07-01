@@ -201,6 +201,39 @@ export interface QuestObjective {
 }
 
 /**
+ * Represents a single item (e.g., word, concept) being learned by a user,
+ * managed by the Spaced Repetition System (SRS).
+ * Stored in `users/{userId}/spellMastery/{itemId}`.
+ */
+export interface SpellMasteryItem {
+  id: string; // Document ID, should be the same as the Firestore document ID (e.g., a unique hash of the word or a UUID)
+  userId: string; // The UID of the user this item belongs to
+
+  // Core content
+  word: string; // The Korean word or concept text
+  translation: string; // Translation or definition of the word
+  // Consider adding:
+  // romanization?: string;
+  // audioUrl?: string; // URL to an audio pronunciation
+  // exampleSentence?: string;
+
+  // SRS Algorithm fields (SM-2 like)
+  masteryLevel: number; // Current level of mastery (e.g., 0-8). Higher means better known.
+                        // Level 0 could mean "new" or "just failed".
+  nextReviewDate: admin.firestore.Timestamp; // When this item should be reviewed next.
+  lastReviewedDate?: admin.firestore.Timestamp; // When this item was last reviewed.
+  easeFactor: number; // Factor determining how much the interval increases (e.g., starts at 2.5).
+  interval: number; // The current interval in days (or other unit) before the next review.
+                    // This is the interval that led to the current nextReviewDate.
+  reviews: number; // Total number of times this item has been reviewed.
+  lapses: number; // Number of times the user failed to recall this item after it was learned (masteryLevel > 0).
+
+  // Optional: For grouping or categorization
+  // category?: string; // e.g., "vocabulary", "grammar rule", "hanja"
+  // tags?: string[];
+}
+
+/**
  * Describes the rewards for completing a quest.
  */
 export interface QuestReward {
