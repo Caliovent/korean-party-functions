@@ -4888,3 +4888,49 @@ Could not load the function, shutting down.. Please visit https://cloud.google.c
 [error] Error: There was an error deploying functions:
 [error] - Error Failed to update function onUserCreate in region europe-west1
 [error] - Error Failed to update function createProfileOnSignup in region us-central1
+[debug] [2025-07-01T21:21:54.193Z] ----------------------------------------------------------------------
+[debug] [2025-07-01T21:21:54.197Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\vschmitt\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only functions
+[debug] [2025-07-01T21:21:54.197Z] CLI Version:   14.8.0
+[debug] [2025-07-01T21:21:54.197Z] Platform:      win32
+[debug] [2025-07-01T21:21:54.197Z] Node Version:  v20.11.0
+[debug] [2025-07-01T21:21:54.197Z] Time:          Tue Jul 01 2025 23:21:54 GMT+0200 (Central European Summer Time)
+[debug] [2025-07-01T21:21:54.197Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-07-01T21:21:54.201Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2025-07-01T21:21:54.443Z] Field "/functions" in "firebase.json" is possibly invalid: must be object
+[debug] [2025-07-01T21:21:54.443Z] Field "/functions/0/runtime" in "firebase.json" is possibly invalid: must be equal to one of the allowed values
+[debug] [2025-07-01T21:21:54.443Z] Field "/functions" in "firebase.json" is possibly invalid: must match a schema in anyOf
+[debug] [2025-07-01T21:21:54.450Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-07-01T21:21:54.450Z] > authorizing via signed-in user (vsc77420@gmail.com)
+[debug] [2025-07-01T21:21:54.450Z] [iam] checking project kacademy-d125a for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2025-07-01T21:21:54.451Z] Checked if tokens are valid: false, expires at: 1751321624979
+[debug] [2025-07-01T21:21:54.451Z] Checked if tokens are valid: false, expires at: 1751321624979
+[debug] [2025-07-01T21:21:54.451Z] > refreshing access token with scopes: []
+[debug] [2025-07-01T21:21:54.452Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2025-07-01T21:21:54.452Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-07-01T21:21:54.904Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2025-07-01T21:21:54.904Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-07-01T21:21:54.927Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/kacademy-d125a:testIamPermissions [none]
+[debug] [2025-07-01T21:21:54.928Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/kacademy-d125a:testIamPermissions x-goog-quota-user=projects/kacademy-d125a
+[debug] [2025-07-01T21:21:54.928Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/kacademy-d125a:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2025-07-01T21:21:55.713Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/kacademy-d125a:testIamPermissions 200
+[debug] [2025-07-01T21:21:55.714Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/kacademy-d125a:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2025-07-01T21:21:55.714Z] Checked if tokens are valid: true, expires at: 1751408513904
+[debug] [2025-07-01T21:21:55.714Z] Checked if tokens are valid: true, expires at: 1751408513904
+[debug] [2025-07-01T21:21:55.715Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/kacademy-d125a/serviceAccounts/kacademy-d125a@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2025-07-01T21:21:55.715Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/kacademy-d125a/serviceAccounts/kacademy-d125a@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2025-07-01T21:21:56.531Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/kacademy-d125a/serviceAccounts/kacademy-d125a@appspot.gserviceaccount.com:testIamPermissions 200
+[debug] [2025-07-01T21:21:56.531Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/kacademy-d125a/serviceAccounts/kacademy-d125a@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[info] 
+[info] === Deploying to 'kacademy-d125a'...
+[info] 
+[info] i  deploying functions 
+[info] Running command: npm run lint --prefix functions
+[debug] [2025-07-01T21:21:59.859Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2025-07-01T21:21:59.859Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2025-07-01T21:22:04.799Z] Error: Timed out.
+    at Timeout._onTimeout (C:\Users\vschmitt\AppData\Roaming\npm\node_modules\firebase-tools\lib\utils.js:267:49)
+    at listOnTimeout (node:internal/timers:573:17)
+    at process.processTimers (node:internal/timers:514:7)
+[error] 
+[error] Error: An unexpected error has occurred.

@@ -206,7 +206,8 @@ export interface QuestObjective {
  * Stored in `users/{userId}/spellMastery/{itemId}`.
  */
 export interface SpellMasteryItem {
-  id: string; // Document ID, should be the same as the Firestore document ID (e.g., a unique hash of the word or a UUID)
+  id: string; // Document ID, should be the same as the Firestore document ID
+              // (e.g., a unique hash of the word or a UUID)
   userId: string; // The UID of the user this item belongs to
 
   // Core content
