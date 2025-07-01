@@ -136,6 +136,8 @@ export interface UserProfile {
   fragments: { vocab: number; grammar: number; culture: number };
   createdAt: admin.firestore.Timestamp;
   guildId?: string; // Optional: ID of the guild the user belongs to
+  totalExperience?: number; // Added for Grimoire Vivant
+  wizardLevel?: number; // Added for Grimoire Vivant
   // Add the new stats object below
   stats: {
     gamesPlayed: number;

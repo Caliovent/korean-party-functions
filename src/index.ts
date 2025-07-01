@@ -138,6 +138,8 @@ export const onUserCreate = functionsV1
           pet: null,
           spellEffect: null,
         },
+        totalExperience: 0, // Initialize Grimoire Vivant fields
+        wizardLevel: 1,    // Initialize Grimoire Vivant fields
       });
 
       console.log(`[Auth Trigger] Firestore document successfully created for user ${uid}.`);
@@ -149,6 +151,71 @@ export const onUserCreate = functionsV1
     }
   });
 
+// =================================================================
+//                    GRIMOIRE VIVANT FUNCTIONS
+// =================================================================
+
+export const updatePlayerExperienceOnRuneChange = functions.firestore
+  .document("playerLearningProfiles/{userId}/spellMasteryStatus/{contentId}")
+  .onWrite(async (change, context) => {
+    const userId = context.params.userId;
+    const userRef = db.collection("users").doc(userId);
+
+    logger.info(`Rune changed for user ${userId}, recalculating total experience.`);
+
+    try {
+      const spellMasterySnapshot = await db
+        .collection(`playerLearningProfiles/${userId}/spellMasteryStatus`)
+        .get();
+
+      let totalExperience = 0;
+      if (spellMasterySnapshot.empty) {
+        logger.info(`No runes found for user ${userId}. Setting experience to 0.`);
+      } else {
+        spellMasterySnapshot.forEach((doc) => {
+          const runeData = doc.data();
+          const masteryLevel = runeData.masteryLevel; // Assuming this field exists
+
+          if (typeof masteryLevel === "number") {
+            switch (masteryLevel) {
+              case 1:
+                totalExperience += 1;
+                break;
+              case 2:
+                totalExperience += 5;
+                break;
+              case 3:
+                totalExperience += 20;
+                break;
+              case 4:
+                totalExperience += 50;
+                break;
+              default:
+                logger.warn(`Unknown masteryLevel ${masteryLevel} for rune ${doc.id} of user ${userId}`);
+            }
+          } else {
+            logger.warn(`masteryLevel is not a number for rune ${doc.id} of user ${userId}:`, masteryLevel);
+          }
+        });
+      }
+
+      // Calculate wizardLevel
+      const wizardLevel = Math.floor(totalExperience / 100) + 1;
+
+      await userRef.update({
+        totalExperience: totalExperience,
+        wizardLevel: wizardLevel,
+      });
+
+      logger.info(`User ${userId} updated. Total Experience: ${totalExperience}, Wizard Level: ${wizardLevel}`);
+      return null;
+    } catch (error) {
+      logger.error(`Error recalculating experience for user ${userId}:`, error);
+      // Optionally, re-throw the error if you want the function to retry or be marked as failed.
+      // For now, we log the error and let the function complete to avoid infinite retries on bad data.
+      return null;
+    }
+  });
 
 export const updateUserProfile = onCall({ cors: true }, async (request) => {
   if (!request.auth) throw new functions.https.HttpsError("unauthenticated", "Vous devez être connecté.");
