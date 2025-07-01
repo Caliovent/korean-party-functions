@@ -1,0 +1,27 @@
+{
+  "users": {
+    "user_ABC123": { // Document ID for a user
+      "displayName": "Apprenant Sorcier",
+      "email": "sorcier@korean-party.mag",
+      // ... other user fields
+      "spellMastery": { // Subcollection
+        "word_001": { // Document ID for a rune (e.g., unique word ID)
+          "masteryLevel": 1,
+          "nextReviewDate": "2025-06-28T10:00:00Z", // ISO 8601 format for Timestamp
+          "easeFactor": 2.5,
+          "successfulReviews": 0,
+          "lastReviewed": "2025-06-24T14:30:00Z"  // ISO 8601 format for Timestamp
+        },
+        "word_002": { // Another rune document
+          "masteryLevel": 2,
+          "nextReviewDate": "2025-07-01T09:00:00Z",
+          "easeFactor": 2.6,
+          "successfulReviews": 1,
+          "lastReviewed": "2025-06-25T11:00:00Z"
+        }
+        // ... other rune documents
+      }
+    }
+    // ... other user documents
+  }
+}
