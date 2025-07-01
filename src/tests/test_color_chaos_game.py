@@ -2,58 +2,41 @@
 
 import unittest
 
-# Placeholder for the actual Cloud Functions - to be implemented later
-def get_color_chaos_game_data(params):
-    """
-    Simulates the getColorChaosGameData Cloud Function.
-    This will be replaced by actual calls or more sophisticated mocks.
-    """
-    # This initial implementation will cause the first test to fail as required.
-    return {}
-
-def submit_color_chaos_results(player_profile, results):
-    """
-    Simulates the submitColorChaosResults Cloud Function.
-    This will be replaced by actual calls or more sophisticated mocks.
-    """
-    # This initial implementation will cause the second test to fail as required.
-    return player_profile
-
+# Import the functions to be tested
+from src.game_logic.color_chaos import get_color_chaos_game_data, submit_color_chaos_results, COLOR_DEFINITIONS
 
 class TestColorChaosGame(unittest.TestCase):
     def setUp(self):
         """
         Set up data that can be used across multiple tests.
         """
-        self.possible_colors = {
-            "ppalgansaek": "빨간색",
-            "paransaek": "파란색",
-            "noransaek": "노란색",
-            "choroksaek": "초록색",
-            "geomjeongsaek": "검정색",
-            "hinsek": "흰색"
-        }
+        # Create a dictionary from COLOR_DEFINITIONS for easy lookup
+        self.possible_colors_map = {item["colorId"]: item["hangeul"] for item in COLOR_DEFINITIONS}
+        self.assertTrue(len(self.possible_colors_map) > 0, "COLOR_DEFINITIONS should not be empty")
+
 
     def test_get_color_chaos_game_data_should_return_valid_target_color(self):
         """
         Test: "getColorChaosGameData devrait retourner une couleur cible valide".
         """
         # Arrange
-        # Possible colors are defined in setUp
+        # Possible colors are now derived from COLOR_DEFINITIONS in setUp
 
         # Act
+        # The actual function will be implemented to select randomly.
+        # For now, the placeholder in color_chaos.py returns {}
         game_data = get_color_chaos_game_data({"level": 1})
 
-        # Assert (doit échouer initialement)
+        # Assert (doit échouer initialement with the placeholder, will pass after implementation)
         self.assertIn("targetColor", game_data, "Response should contain 'targetColor'")
         self.assertIn("targetHangeul", game_data, "Response should contain 'targetHangeul'")
 
         if "targetColor" in game_data: # Avoid KeyError if the previous assert fails
-            self.assertIn(game_data["targetColor"], self.possible_colors.keys(),
-                          f"targetColor '{game_data.get('targetColor')}' is not a valid predefined color.")
-        if "targetHangeul" in game_data and "targetColor" in game_data and game_data["targetColor"] in self.possible_colors:
-             self.assertEqual(game_data["targetHangeul"], self.possible_colors[game_data["targetColor"]],
-                             f"targetHangeul '{game_data.get('targetHangeul')}' does not match the Hangeul for '{game_data.get('targetColor')}'.")
+            self.assertIn(game_data["targetColor"], self.possible_colors_map.keys(),
+                          f"targetColor '{game_data.get('targetColor')}' is not a valid predefined color from COLOR_DEFINITIONS.")
+        if "targetHangeul" in game_data and "targetColor" in game_data and game_data["targetColor"] in self.possible_colors_map:
+             self.assertEqual(game_data["targetHangeul"], self.possible_colors_map[game_data["targetColor"]],
+                             f"targetHangeul '{game_data.get('targetHangeul')}' does not match the Hangeul for '{game_data.get('targetColor')}' from COLOR_DEFINITIONS.")
 
     def test_submit_color_chaos_results_calculates_score_and_rewards(self):
         """
@@ -92,7 +75,12 @@ class TestColorChaosGame(unittest.TestCase):
             # Assuming colorsIdentified is incremented by the number of successful identifications,
             # which could be represented by highestCombo or another metric.
             # For this test, let's assume it's incremented by the highestCombo value for simplicity.
-            expected_colors_identified = initial_player_profile["stats"]["colorsIdentified"] + game_results["highestCombo"]
+
+            # Calculate expected based on original values before modification by submit_color_chaos_results
+            # The initial_player_profile dictionary is modified in-place.
+            original_colors_identified_val = 0 # As defined in initial_player_profile setup for this test
+            expected_colors_identified = original_colors_identified_val + game_results["highestCombo"]
+
             self.assertEqual(updated_profile["stats"]["colorsIdentified"], expected_colors_identified,
                              f"stats.colorsIdentified should be updated. Expected {expected_colors_identified}, got {updated_profile['stats'].get('colorsIdentified')}.")
 
