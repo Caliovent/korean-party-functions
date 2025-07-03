@@ -1,0 +1,44 @@
+[
+  {
+    "hangeul": "김치",
+    "french_name": "Kimchi",
+    "category": "plat",
+    "imageUrl": "/assets/images/food/kimchi.png",
+    "audioUrl": "/assets/audio/food/kimchi.mp3"
+  },
+  {
+    "hangeul": "비빔밥",
+    "french_name": "Bibimbap",
+    "category": "plat",
+    "imageUrl": "/assets/images/food/bibimbap.png",
+    "audioUrl": "/assets/audio/food/bibimbap.mp3"
+  },
+  {
+    "hangeul": "쌀",
+    "french_name": "Riz",
+    "category": "ingredient",
+    "imageUrl": "/assets/images/food/rice.png",
+    "audioUrl": "/assets/audio/food/ssal.mp3"
+  },
+  {
+    "hangeul": "물",
+    "french_name": "Eau",
+    "category": "boisson",
+    "imageUrl": "/assets/images/food/water.png",
+    "audioUrl": "/assets/audio/food/mul.mp3"
+  },
+  {
+    "hangeul": "불고기",
+    "french_name": "Bulgogi",
+    "category": "plat",
+    "imageUrl": "/assets/images/food/bulgogi.png",
+    "audioUrl": "/assets/audio/food/bulgogi.mp3"
+  },
+  {
+    "hangeul": "고추장",
+    "french_name": "Gochujang (Pâte de piment)",
+    "category": "ingredient",
+    "imageUrl": "/assets/images/food/gochujang.png",
+    "audioUrl": "/assets/audio/food/gochujang.mp3"
+  }
+]
