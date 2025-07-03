@@ -46,12 +46,28 @@ service cloud.firestore {
     //   allow read, write: if request.auth != null && request.auth.uid == userId;
     // }
 
-    // Quest System Rules
-    // Quest definitions are public to read for authenticated users, write by admin only (via console/SDK admin)
+    // Rules for Game Content Collections (read-only for clients)
+    match /koreanContentBible/{wordId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Content managed by Observatory only
+    }
     match /questDefinitions/{questId} {
       allow read: if request.auth != null;
-      allow write: if false; // Managed by admin/backend
+      allow write: if false; // Content managed by Observatory only
     }
+    match /spellDefinitions/{spellId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Content managed by Observatory only
+    }
+    match /syllablePuzzles/{puzzleId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Content managed by Observatory only
+    }
+    match /foodItemDefinitions/{itemId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Content managed by Observatory only
+    }
+    // Add other content collections here following the same pattern
 
     // Player's quest data
     match /playerQuests/{userId} {

@@ -1,0 +1,38 @@
+[
+  {
+    "syllable": "글",
+    "jamo": ["ㄱ", "ㅡ", "ㄹ"],
+    "difficulty": 2,
+    "type": "CVC"
+  },
+  {
+    "syllable": "한",
+    "jamo": ["ㅎ", "ㅏ", "ㄴ"],
+    "difficulty": 1,
+    "type": "CVC"
+  },
+  {
+    "syllable": "강",
+    "jamo": ["ㄱ", "ㅏ", "ㅇ"],
+    "difficulty": 2,
+    "type": "CVC"
+  },
+  {
+    "syllable": "꽃",
+    "jamo": ["ㄲ", "ㅗ", "ㅊ"],
+    "difficulty": 3,
+    "type": "CVC"
+  },
+  {
+    "syllable": "위",
+    "jamo": ["ㅇ", "ㅜ", "ㅣ"],
+    "difficulty": 2,
+    "type": "CVV"
+  },
+  {
+    "syllable": "의",
+    "jamo": ["ㅇ", "ㅡ", "ㅣ"],
+    "difficulty": 3,
+    "type": "CVV"
+  }
+]

@@ -1,0 +1,87 @@
+[
+  {
+    "title": "Le Festin du Débutant",
+    "description": "Prouvez votre connaissance des bases de la cuisine coréenne.",
+    "type": "side",
+    "objective": {
+      "type": "MINIGAME_SCORE",
+      "target": "FOOD_FEAST",
+      "count": 5000
+    },
+    "rewards": {
+      "xp": 150,
+      "mana": 30
+    },
+    "prerequisites": {
+      "level": 5
+    }
+  },
+  {
+    "title": "L'Appel du Marché",
+    "description": "Collectez les ingrédients frais pour un Bibimbap.",
+    "type": "main",
+    "objective": {
+      "type": "COLLECT_ITEM",
+      "target": "INGREDIENT_SET_BIBIMBAP",
+      "count": 1
+    },
+    "rewards": {
+      "xp": 200,
+      "mana": 50,
+      "gold": 100
+    },
+    "prerequisites": {
+      "level": 3,
+      "completedQuest": "INTRO_MARKET_VISIT"
+    }
+  },
+  {
+    "title": "Duel de Syllabes Quotidien",
+    "description": "Remportez une victoire dans l'arène des Syllabes.",
+    "type": "daily",
+    "objective": {
+      "type": "MINIGAME_WINS",
+      "target": "SYLLABLE_BATTLE",
+      "count": 1
+    },
+    "rewards": {
+      "xp": 75,
+      "mana": 20
+    },
+    "prerequisites": {}
+  },
+  {
+    "title": "Pèlerinage à Gyeongbokgung",
+    "description": "Visitez le majestueux palais de Gyeongbokgung.",
+    "type": "event",
+    "objective": {
+      "type": "VISIT_LOCATION",
+      "target": "GYEONGBOKGUNG_PALACE",
+      "count": 1
+    },
+    "rewards": {
+      "xp": 300,
+      "specialItem": "ROYAL_SEAL_FRAGMENT"
+    },
+    "prerequisites": {
+      "level": 10
+    }
+  },
+  {
+    "title": "Maîtrise des Consonnes Doubles",
+    "description": "Atteignez un score élevé au mini-jeu des consonnes.",
+    "type": "side",
+    "objective": {
+      "type": "MINIGAME_SCORE",
+      "target": "DOUBLE_CONSONANT_CHALLENGE",
+      "count": 10000
+    },
+    "rewards": {
+      "xp": 180,
+      "mana": 40
+    },
+    "prerequisites": {
+      "level": 8
+    }
+  }
+]

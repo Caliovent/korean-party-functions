@@ -1,0 +1,47 @@
+[
+  {
+    "spellId": "KARMIC_SWAP",
+    "name": "Échange Karmique",
+    "description": "Échangez votre position sur le plateau avec un autre joueur.",
+    "manaCost": 40,
+    "type": "CHAOS",
+    "target": "opponent",
+    "effectDetails": { "action": "SWAP_POSITION" }
+  },
+  {
+    "spellId": "MANA_SHIELD",
+    "name": "Bouclier de Mana",
+    "description": "Absorbe les 50 prochains points de dégâts de mana.",
+    "manaCost": 25,
+    "type": "DEFENSIVE",
+    "target": "self",
+    "effectDetails": { "action": "APPLY_MANA_SHIELD", "value": 50 }
+  },
+  {
+    "spellId": "SYLLABLE_STUN",
+    "name": "Étourdissement Syllabique",
+    "description": "Force un adversaire à passer son prochain tour de mini-jeu.",
+    "manaCost": 35,
+    "type": "OFFENSIVE",
+    "target": "opponent",
+    "effectDetails": { "action": "MINIGAME_SKIP_TURN" }
+  },
+  {
+    "spellId": "TELEPORT_TO_MARKET",
+    "name": "Téléportation au Marché",
+    "description": "Vous téléporte instantanément à la case Marché la plus proche.",
+    "manaCost": 20,
+    "type": "UTILITY",
+    "target": "self",
+    "effectDetails": { "action": "TELEPORT", "destinationType": "MARKET_TILE" }
+  },
+  {
+    "spellId": "VOCAB_TRAP",
+    "name": "Piège de Vocabulaire",
+    "description": "Pose un piège sur une case. Le prochain joueur à y atterrir doit réussir un test de vocabulaire difficile ou perdre du mana.",
+    "manaCost": 30,
+    "type": "TRAP",
+    "target": "tile",
+    "effectDetails": { "action": "PLACE_TRAP", "trapType": "VOCAB_CHALLENGE" }
+  }
+]
