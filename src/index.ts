@@ -3173,3 +3173,62 @@ export const getGuildDetails = functions.https.onCall(async (request) => {
 // [DUPLICATE FUNCTION createGuild REMOVED]
 // The definition for createGuild using functions.https.onCall (v1 style)
 // that was previously here has been removed to favor the v2 version defined earlier in the file.
+
+// =================================================================
+//                    MINI-GAME ACTION BROADCAST
+// =================================================================
+
+export const updateMiniGameAction = onCall({ cors: true }, async (request: functions.https.CallableRequest) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Vous devez être connecté pour mettre à jour une action de mini-jeu.");
+  }
+  const uid = request.auth.uid;
+  const { gameId, action, payload } = request.data;
+
+  if (typeof gameId !== "string" || gameId.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'ID de la partie (gameId) est manquant ou invalide.");
+  }
+  if (typeof action !== "string" || action.trim() === "") {
+    throw new HttpsError("invalid-argument", "L'action (action) est manquante ou invalide.");
+  }
+  if (typeof payload !== "object" || payload === null) {
+    throw new HttpsError("invalid-argument", "La charge utile (payload) est manquante ou invalide.");
+  }
+
+  const gameRef = db.collection("games").doc(gameId);
+
+  try {
+    const gameDoc = await gameRef.get();
+    if (!gameDoc.exists) {
+      throw new HttpsError("not-found", `La partie avec l'ID ${gameId} n'a pas été trouvée.`);
+    }
+
+    const gameData = gameDoc.data() as Game;
+
+    // Validate that the caller is the miniGameInitiatorId
+    // Assuming miniGameInitiatorId is a field on the Game document
+    if (!gameData.miniGameInitiatorId) {
+      throw new HttpsError("failed-precondition", "Aucun mini-jeu n'est actuellement actif ou l'initiateur n'est pas défini.");
+    }
+    if (gameData.miniGameInitiatorId !== uid) {
+      throw new HttpsError("permission-denied", "Seul le joueur actif du mini-jeu peut mettre à jour l'action.");
+    }
+
+    const miniGameLiveState = {
+      lastAction: action,
+      payload: payload,
+      timestamp: admin.firestore.Timestamp.now(),
+    };
+
+    await gameRef.update({ miniGameLiveState });
+
+    logger.info(`Mini-jeu action [${action}] mise à jour pour la partie ${gameId} par ${uid}. Payload: ${JSON.stringify(payload)}`);
+    return { success: true, message: "Action de mini-jeu mise à jour avec succès." };
+  } catch (error) {
+    logger.error(`Erreur lors de la mise à jour de l'action du mini-jeu pour la partie ${gameId} par ${uid}:`, error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", "Une erreur interne est survenue lors de la mise à jour de l'action du mini-jeu.");
+  }
+});

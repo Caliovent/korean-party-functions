@@ -96,6 +96,12 @@ export interface Game {
   // Guild related fields for the player object within a game context (if different from UserProfile)
   // guildId?: string;
   // guildTag?: string;
+  miniGameInitiatorId?: string; // UID of the player who is currently active in a mini-game
+  miniGameLiveState?: {
+    lastAction: string;
+    payload: object;
+    timestamp: admin.firestore.Timestamp;
+  } | null;
 }
 
 // =================================================================
