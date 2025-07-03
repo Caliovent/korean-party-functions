@@ -8,13 +8,33 @@ import * as functionsV1 from "firebase-functions/v1"; // Importation de v1 pour 
 import * as functions from "firebase-functions/v2"; // Importation de v2 pour les autres fonctions
 import * as logger from "firebase-functions/logger";
 import { getXpForLevel } from "./xpUtils";
-import { Player, Tile, Guild, SendTyphoonAttackRequest, SendTyphoonAttackResponse, Game, SendTyphoonAttackSuccessResponse, SendTyphoonAttackFailureResponse, QuestDefinition, PlayerActiveQuest, SpellMasteryItem } from "./types";
+import {
+  Player,
+  Tile,
+  Guild,
+  SendTyphoonAttackRequest,
+  SendTyphoonAttackResponse,
+  Game,
+  SendTyphoonAttackSuccessResponse,
+  SendTyphoonAttackFailureResponse,
+  QuestDefinition,
+  PlayerActiveQuest,
+  SpellMasteryItem,
+  PrepareMiniGameChallengeRequest, // Added
+  MiniGameChallenge,               // Added
+  ContentItem,                     // Added
+  UserProfileWithCEFR,             // Added
+  SpellMasteryItemWithCEFR,        // Added
+} from "./types";
 import { SPELL_DEFINITIONS, SpellId } from "./spells";
 import { eventCards } from "./data/eventCards";
 
 // Mana Reward Constants
 const MANA_REWARD_MINI_GAME_QUIZ = 20;
 // const MANA_REWARD_HANGEUL_TYPHOON = 40; // Placeholder for future use
+
+// Mini-Game Challenge Constants
+const DEFAULT_CHALLENGE_SIZE = 4; // 1 correct, 3 distractors
 
 // SRS Constants
 const DEFAULT_EASE_FACTOR = 2.5;
@@ -2601,6 +2621,467 @@ export const getReviewItems = onCall({ cors: true }, async (request) => {
 
 // Potentiellement d'autres fonctions ici...
 // export const anotherFunction = functions.https.onRequest(...)
+
+// =================================================================
+//                    MINI-GAME CONTENT SELECTION
+// =================================================================
+
+export const prepareMiniGameChallenge = onCall<PrepareMiniGameChallengeRequest>(
+  { cors: true }, // Assuming CORS is needed, adjust as necessary
+  async (request): Promise<MiniGameChallenge> => {
+    logger.info("prepareMiniGameChallenge called with data:", request.data);
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Authentication required to prepare a mini-game challenge.");
+    }
+
+    const { gameId, miniGameType, difficulty } = request.data;
+
+    // Basic input validation
+    if (!gameId || typeof gameId !== "string" || gameId.trim() === "") {
+      throw new HttpsError("invalid-argument", "Missing or invalid gameId.");
+    }
+    if (!miniGameType || typeof miniGameType !== "string" || miniGameType.trim() === "") {
+      throw new HttpsError("invalid-argument", "Missing or invalid miniGameType.");
+    }
+    const validDifficulties = ["très facile", "moyen", "difficile", "extrême"];
+    if (!difficulty || !validDifficulties.includes(difficulty)) {
+      throw new HttpsError("invalid-argument", `Invalid difficulty. Must be one of: ${validDifficulties.join(", ")}.`);
+    }
+
+    const uid = request.auth.uid; // The user requesting this, might not be the current player if called by a game host/server logic
+    logger.info(`Request by user ${uid} for game ${gameId}, type ${miniGameType}, difficulty ${difficulty}.`);
+
+    let gameDoc;
+    let gameData: Game;
+    let currentPlayerId: string;
+    let userProfileData: UserProfileWithCEFR | undefined;
+    const playerSpellMastery = new Map<string, SpellMasteryItemWithCEFR>();
+
+    try {
+      // 1. Fetch game data to find current player ID.
+      gameDoc = await db.collection("games").doc(gameId).get();
+      if (!gameDoc.exists) {
+        logger.error(`Game document ${gameId} not found.`);
+        throw new HttpsError("not-found", `Game ${gameId} not found.`);
+      }
+      gameData = gameDoc.data() as Game;
+      currentPlayerId = gameData.currentPlayerId || gameData.players[0]?.uid; // Fallback to first player if currentPlayerId is not set
+
+      if (!currentPlayerId) {
+        logger.error(`Could not determine currentPlayerId for game ${gameId}.`);
+        throw new HttpsError("internal", "Could not determine the current player for the game.");
+      }
+      logger.info(`Current player ID for game ${gameId} is ${currentPlayerId}.`);
+
+      // 2. Fetch current player's learning profile (spellMasteryStatus) & global CEFR level (users/{playerId}).
+      const userProfileDoc = await db.collection("users").doc(currentPlayerId).get();
+      if (!userProfileDoc.exists) {
+        logger.warn(`User profile ${currentPlayerId} not found. Proceeding without CEFR level or specific user data.`);
+        // Not throwing an error, as some basic challenges might still be possible without it.
+        // The selection algorithm will need to handle this case.
+      } else {
+        userProfileData = userProfileDoc.data() as UserProfileWithCEFR;
+        logger.info(`User profile for ${currentPlayerId} fetched. CEFR level: ${userProfileData.playerCefrLevel || "not set"}`);
+      }
+
+      const spellMasterySnapshot = await db
+        .collection("playerLearningProfiles")
+        .doc(currentPlayerId)
+        .collection("spellMasteryStatus")
+        .get();
+
+      if (spellMasterySnapshot.empty) {
+        logger.info(`No spell mastery items found for player ${currentPlayerId}.`);
+      } else {
+        spellMasterySnapshot.forEach((doc) => {
+          // Assuming doc.id is the contentId (e.g., the Hangeul word itself or a unique ID)
+          playerSpellMastery.set(doc.id, doc.data() as SpellMasteryItemWithCEFR);
+        });
+        logger.info(`Fetched ${playerSpellMastery.size} spell mastery items for player ${currentPlayerId}.`);
+      }
+    } catch (error) {
+      logger.error("Error fetching game or player data:", error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "Failed to fetch necessary game or player data.", error);
+    }
+
+    // 3. Fetch content items for the miniGameType
+    let contentCollectionName: string;
+    switch (miniGameType) {
+    case "festinDesMots": // Assuming "Festin des Mots" uses this key
+      contentCollectionName = "foodItemDefinitions";
+      break;
+    case "syllablePuzzle":
+      contentCollectionName = "syllablePuzzles";
+      break;
+    // Add more cases for other miniGameTypes and their corresponding collection names
+    // case "colorChaos":
+    //   contentCollectionName = "colorChaosDefinitions"; // Example
+    //   break;
+    default:
+      logger.error(`Unknown miniGameType: ${miniGameType}`);
+      throw new HttpsError("invalid-argument", `Unsupported miniGameType: ${miniGameType}.`);
+    }
+
+    const allContentItems: ContentItem[] = [];
+    try {
+      const contentSnapshot = await db.collection(contentCollectionName).get();
+      if (contentSnapshot.empty) {
+        logger.error(`No content items found in collection ${contentCollectionName} for miniGameType ${miniGameType}.`);
+        throw new HttpsError("not-found", `No content found for ${miniGameType}.`);
+      }
+      contentSnapshot.forEach((doc) => {
+        // Assuming content items have an 'id' field or we use doc.id
+        // And that their structure matches ContentItem interface (especially hangeul, french_name, and assumed cefrLevel)
+        allContentItems.push({ id: doc.id, ...doc.data() } as ContentItem);
+      });
+      logger.info(`Fetched ${allContentItems.length} content items from ${contentCollectionName} for ${miniGameType}.`);
+    } catch (error) {
+      logger.error(`Error fetching content items from ${contentCollectionName}:`, error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", `Failed to fetch content for ${miniGameType}.`, error);
+    }
+
+    // TODO: Implement the core logic:
+    // 4. Apply selection algorithm based on difficulty.
+
+    interface CategorizedContent {
+      mastery1: ContentItem[];
+      mastery2: ContentItem[];
+      mastery3: ContentItem[];
+      mastery4: ContentItem[];
+      newItems: ContentItem[]; // All new items, regardless of CEFR
+      newItemsByCEFR: Map<string, ContentItem[]>; // New items, grouped by CEFR
+      allItemsByCEFR: Map<string, ContentItem[]>; // All items (new or learned), grouped by CEFR
+    }
+
+    const categorizedContent: CategorizedContent = {
+      mastery1: [],
+      mastery2: [],
+      mastery3: [],
+      mastery4: [],
+      newItems: [],
+      newItemsByCEFR: new Map(),
+      allItemsByCEFR: new Map(),
+    };
+
+    const playerGlobalCEFR = userProfileData?.playerCefrLevel;
+    logger.info(`Player's global CEFR level for ${currentPlayerId}: ${playerGlobalCEFR || "Not set (will affect 'moyen', 'difficile', 'extrême' accuracy)"}`);
+
+    let itemsMissingCEFRData = 0;
+    allContentItems.forEach((item) => {
+      if (!item.cefrLevel) {
+        itemsMissingCEFRData++;
+      }
+      const masteryInfo = playerSpellMastery.get(item.id!); // item.id is the key from content collection doc ID
+      const itemCEFR = item.cefrLevel || "unknown";
+
+      if (!categorizedContent.allItemsByCEFR.has(itemCEFR)) {
+        categorizedContent.allItemsByCEFR.set(itemCEFR, []);
+      }
+      categorizedContent.allItemsByCEFR.get(itemCEFR)!.push(item);
+
+      if (masteryInfo) {
+        // Item is in player's learning profile
+        switch (masteryInfo.masteryLevel) {
+        case 1: categorizedContent.mastery1.push(item); break;
+        case 2: categorizedContent.mastery2.push(item); break;
+        case 3: categorizedContent.mastery3.push(item); break;
+        case 4: categorizedContent.mastery4.push(item); break;
+        default: // Includes masteryLevel 0 or other unexpected values
+          // Treat as 'new' for selection if mastery is 0 or not 1-4
+          categorizedContent.newItems.push(item);
+          if (!categorizedContent.newItemsByCEFR.has(itemCEFR)) {
+            categorizedContent.newItemsByCEFR.set(itemCEFR, []);
+          }
+          categorizedContent.newItemsByCEFR.get(itemCEFR)!.push(item);
+          break;
+        }
+      } else {
+        // Item is not in player's learning profile, hence it's "new"
+        categorizedContent.newItems.push(item);
+        if (!categorizedContent.newItemsByCEFR.has(itemCEFR)) {
+          categorizedContent.newItemsByCEFR.set(itemCEFR, []);
+        }
+        categorizedContent.newItemsByCEFR.get(itemCEFR)!.push(item);
+      }
+    });
+
+    logger.info(`Categorized content for player ${currentPlayerId}: M1(${categorizedContent.mastery1.length}), M2(${categorizedContent.mastery2.length}), M3(${categorizedContent.mastery3.length}), M4(${categorizedContent.mastery4.length}), New(${categorizedContent.newItems.length})`);
+    categorizedContent.newItemsByCEFR.forEach((items, cefr) => logger.info(`  New items for CEFR ${cefr}: ${items.length}`));
+    categorizedContent.allItemsByCEFR.forEach((items, cefr) => logger.info(`  All items for CEFR ${cefr}: ${items.length}`));
+
+    if (itemsMissingCEFRData > 0) {
+      logger.warn(`${itemsMissingCEFRData}/${allContentItems.length} content items are missing CEFR level data. This will impact CEFR-based difficulty scaling for 'moyen', 'difficile', 'extrême'. Items without CEFR will be grouped under 'unknown' CEFR level.`);
+    }
+    if (!playerGlobalCEFR && (difficulty === "moyen" || difficulty === "difficile" || difficulty === "extrême")) {
+      logger.warn(`Player ${currentPlayerId} is missing a global CEFR level. Difficulty settings 'moyen', 'difficile', and 'extrême' will rely on fallbacks and may not be optimally targeted.`);
+    }
+
+    // Helper function to get a CEFR level higher than the player's
+    const getHigherCEFR = (currentCEFR: string | undefined): string | undefined => {
+      if (!currentCEFR) return undefined; // Cannot determine higher if current is unknown
+      const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+      const currentIndex = levels.indexOf(currentCEFR.toUpperCase());
+      if (currentIndex === -1 || currentIndex === levels.length - 1) return undefined; // Unknown or already highest
+      return levels[currentIndex + 1];
+    };
+
+    // Helper function to get a CEFR level lower than the player's
+    const getLowerCEFR = (currentCEFR: string | undefined): string | undefined => {
+      if (!currentCEFR) return undefined;
+      const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+      const currentIndex = levels.indexOf(currentCEFR.toUpperCase());
+      if (currentIndex === -1 || currentIndex === 0) return undefined; // Unknown or already lowest
+      return levels[currentIndex - 1];
+    };
+
+
+    // This is a simplified selection. We need one target item.
+    let targetItem: ContentItem | undefined = undefined;
+    // This set will keep track of items already picked for the current challenge (target + distractors)
+    const pickedItemIdsForChallenge = new Set<string>();
+
+    // Simplified item selection logic - picks ONE item for now
+    // More sophisticated logic will pick based on quotas and fallbacks
+    const pickRandomItem = (items: ContentItem[]): ContentItem | undefined => {
+      if (items.length === 0) return undefined;
+      const availableItems = items.filter((item) => !pickedItemIdsForChallenge.has(item.id!));
+      if (availableItems.length === 0) return undefined;
+      const randomIndex = Math.floor(Math.random() * availableItems.length);
+      const picked = availableItems[randomIndex];
+      pickedItemIdsForChallenge.add(picked.id!);
+      return picked;
+    };
+
+    // Function to pick one item based on prioritized lists
+    const pickOneFromPrioritizedLists = (lists: ContentItem[][]): ContentItem | undefined => {
+      for (const list of lists) {
+        const item = pickRandomItem(list);
+        if (item) return item;
+      }
+      return undefined;
+    };
+
+    switch (difficulty) {
+    case "très facile":
+      // Majoritairement M1, M2. Fill with M3, M4, then New (player's CEFR), then any New.
+      targetItem = pickOneFromPrioritizedLists([
+        categorizedContent.mastery1,
+        categorizedContent.mastery2,
+        categorizedContent.mastery3,
+        categorizedContent.mastery4,
+        playerGlobalCEFR ? categorizedContent.newItemsByCEFR.get(playerGlobalCEFR) || [] : [],
+        categorizedContent.newItems, // Any new item if CEFR specific new items are not found
+        playerGlobalCEFR ? categorizedContent.allItemsByCEFR.get(playerGlobalCEFR) || [] : [], // Fallback to any item of player's CEFR
+      ]);
+      break;
+    case "moyen":
+      // Ciblez M3, M4. Introduisez 20-30% de nouveaux mots (player's CEFR).
+      // For simplicity, let's say 1 out of 1 target item could be new.
+      // This needs a more complex picker that manages proportions if we were picking multiple items.
+      // For one item, we can use a probability or alternate.
+      if (Math.random() < 0.30 && playerGlobalCEFR && (categorizedContent.newItemsByCEFR.get(playerGlobalCEFR) || []).length > 0) {
+        targetItem = pickRandomItem(categorizedContent.newItemsByCEFR.get(playerGlobalCEFR)!);
+      }
+      if (!targetItem) {
+        targetItem = pickOneFromPrioritizedLists([
+          categorizedContent.mastery3,
+          categorizedContent.mastery4,
+          categorizedContent.mastery2, // Fallback
+          categorizedContent.mastery1, // Fallback
+        ]);
+      }
+      // If still no item, try new items of player's CEFR again, then any new.
+      if (!targetItem && playerGlobalCEFR) {
+        targetItem = pickRandomItem(categorizedContent.newItemsByCEFR.get(playerGlobalCEFR) || []);
+      }
+      if (!targetItem) {
+        targetItem = pickRandomItem(categorizedContent.newItems);
+      }
+      break;
+    case "difficile":
+      // Majorité de nouveaux mots pertinents (player's CEFR). Fill with M4, M3.
+      // For one item, prioritize new words of player's CEFR.
+      if (playerGlobalCEFR) {
+        targetItem = pickRandomItem(categorizedContent.newItemsByCEFR.get(playerGlobalCEFR) || []);
+      }
+      if (!targetItem) { // Fallback if no new words for player's CEFR
+        targetItem = pickOneFromPrioritizedLists([
+          categorizedContent.mastery4,
+          categorizedContent.mastery3,
+          categorizedContent.newItems, // Any new item
+        ]);
+      }
+      break;
+    case "extrême":
+      // Nouveaux mots complexes ou d'un niveau CEFR supérieur.
+      const higherCEFR = getHigherCEFR(playerGlobalCEFR);
+      if (higherCEFR) {
+        targetItem = pickRandomItem(categorizedContent.newItemsByCEFR.get(higherCEFR) || []);
+      }
+      if (!targetItem && playerGlobalCEFR) { // Fallback to complex (new) words of current CEFR
+        targetItem = pickRandomItem(categorizedContent.newItemsByCEFR.get(playerGlobalCEFR) || []);
+      }
+      if (!targetItem) { // Fallback to any new word
+        targetItem = pickRandomItem(categorizedContent.newItems);
+      }
+      if (!targetItem) { // Furthest fallback: highest mastery items
+        targetItem = pickOneFromPrioritizedLists([
+          categorizedContent.mastery4,
+          categorizedContent.mastery3,
+        ]);
+      }
+      break;
+    }
+
+    if (!targetItem) {
+      // Fallback: if no item could be selected based on difficulty logic, pick any random item from all content.
+      logger.warn(`No target item found for difficulty ${difficulty} with preferred logic. Picking any random available item.`);
+      const allAvailableContent = allContentItems.filter(item => !pickedItemIdsForChallenge.has(item.id!));
+      if (allAvailableContent.length > 0) {
+        targetItem = pickRandomItem(allAvailableContent);
+      } else {
+         // This case means all items might have been picked (e.g. if content set is very small)
+        logger.error("No available content items left to pick for the target item, even after fallback.");
+        throw new HttpsError("internal", `Insufficient content to generate a challenge for difficulty ${difficulty}. All items may have been picked or content is empty.`);
+      }
+    }
+
+    if (!targetItem) { // Final check, should ideally not be reached if previous fallback worked.
+        logger.error(`CRITICAL: Still no targetItem selected even after broadest fallback for difficulty ${difficulty}. Content set might be too small or empty.`);
+        throw new HttpsError("internal", `Could not select a target item for the challenge. Content set might be empty or too small.`);
+    }
+
+
+    // 5. Assemble challenge object (question, correctAnswer, distractors).
+
+    // Ensure targetItem has been selected
+    if (!targetItem) {
+      // This should have been caught earlier, but as a safeguard:
+      logger.error("CRITICAL: targetItem is undefined at the start of Assemble Challenge Object step.");
+      throw new HttpsError("internal", "Failed to select a target item for the challenge.");
+    }
+
+    const correctAnswerValue = targetItem.hangeul || targetItem.word || "Unknown Answer"; // Adapt based on content type
+    let questionTextValue: string | undefined = undefined;
+    let questionImageUrlValue: string | undefined = undefined;
+    let questionAudioUrlValue: string | undefined = undefined;
+    let challengeTypeValue: string;
+
+    // Determine question type and details based on miniGameType
+    // This is a simplified example; more sophisticated logic might be needed
+    switch (miniGameType) {
+    case "festinDesMots":
+      challengeTypeValue = "VOCAB_FR_TO_KO"; // Default for festinDesMots
+      questionTextValue = `Traduisez : "${targetItem.french_name}"`;
+      if (targetItem.imageUrl) { // Potentially offer image questions too
+        // Add logic to sometimes use image as question
+        // challengeTypeValue = "VOCAB_IMG_TO_KO";
+        // questionTextValue = "Quel est cet aliment ?";
+        questionImageUrlValue = targetItem.imageUrl;
+      }
+      if (targetItem.audioUrl) {
+        questionAudioUrlValue = targetItem.audioUrl; // Can be provided alongside text/image
+      }
+      break;
+    case "syllablePuzzle":
+      challengeTypeValue = "SYLLABLE_CONSTRUCTION";
+      // For syllable puzzles, the 'question' might be implied by the available syllables client-side.
+      // The 'correctAnswer' would be the full word.
+      // `targetItem` for syllablePuzzle might have `hangeul` (full word) and perhaps `syllables` (array of syllables).
+      questionTextValue = `Formez le mot : ${targetItem.hangeul}`; // Or provide syllables if structured that way
+      break;
+    // Add cases for other miniGameTypes like "colorChaos"
+    // case "colorChaos":
+    //   challengeTypeValue = "COLOR_WORD_STROOP";
+    //   questionTextValue = targetItem.word; // e.g., "ROUGE" displayed in green
+    //   // The client would use targetItem.colorHex to display the text in that color.
+    //   // correctAnswerValue would be targetItem.correctColorName (e.g., "Vert")
+    //   break;
+    default:
+      logger.warn(`No specific question/challenge type logic for miniGameType: ${miniGameType}. Using generic setup.`);
+      challengeTypeValue = "GENERIC_CHALLENGE";
+      questionTextValue = targetItem.french_name || `Identifier : ${targetItem.hangeul || targetItem.word}`;
+      questionImageUrlValue = targetItem.imageUrl;
+      questionAudioUrlValue = targetItem.audioUrl;
+      break;
+    }
+
+    // Select 3 distractors
+    const distractors: string[] = [];
+    const potentialDistractorItems = allContentItems.filter(
+      (item) => item.id !== targetItem!.id && (item.hangeul || item.word) // Ensure item has a usable value for distractor
+    );
+
+    // Shuffle potential distractors to get variety
+    for (let i = potentialDistractorItems.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [potentialDistractorItems[i], potentialDistractorItems[j]] = [potentialDistractorItems[j], potentialDistractorItems[i]];
+    }
+
+    for (const distractorItem of potentialDistractorItems) {
+      if (distractors.length >= 3) break;
+      // Ensure the distractor value is not the same as the correct answer, and not already picked
+      const distractorValue = distractorItem.hangeul || distractorItem.word!;
+      if (distractorValue !== correctAnswerValue && !pickedItemIdsForChallenge.has(distractorItem.id!)) {
+        distractors.push(distractorValue);
+        pickedItemIdsForChallenge.add(distractorItem.id!); // Mark as used for this challenge session
+      }
+    }
+
+    // If not enough unique distractors found, fill with generic or common incorrect options if available,
+    // or log a warning. For simplicity, this example might have fewer than 3 if content is sparse.
+    if (distractors.length < 3) {
+      logger.warn(`Could only find ${distractors.length} distractors for target ${correctAnswerValue}. MiniGameType: ${miniGameType}. Total content items: ${allContentItems.length}`);
+      // Fill with placeholders if absolutely necessary, though ideally content should be rich enough.
+      const neededPlaceholders = 3 - distractors.length;
+      for (let i = 0; i < neededPlaceholders; i++) {
+        distractors.push(`Distracteur ${i + 1}`); // Very basic placeholder
+      }
+    }
+
+    const challenge: MiniGameChallenge = {
+      questionText: questionTextValue,
+      questionImageUrl: questionImageUrlValue,
+      questionAudioUrl: questionAudioUrlValue,
+      correctAnswer: correctAnswerValue,
+      distractors: distractors,
+      challengeType: challengeTypeValue,
+      answerDetails: { // Store details of the target item
+        hangeul: targetItem.hangeul,
+        french_name: targetItem.french_name,
+        category: targetItem.category,
+        cefrLevel: targetItem.cefrLevel, // Assumed
+        imageUrl: targetItem.imageUrl,
+        audioUrl: targetItem.audioUrl,
+        // Copy other relevant fields from targetItem if needed for UI or scoring
+      },
+    };
+
+    logger.info("Challenge object assembled:", challenge);
+
+    // 6. Update game document (games/{gameId}) with currentChallengeData.
+    try {
+      await db.collection("games").doc(gameId).update({
+        currentChallengeData: challenge,
+        lastChallengePreparedAt: FieldValue.serverTimestamp(), // Optional: useful for tracking
+      });
+      logger.info(`Game document ${gameId} successfully updated with new challenge data.`);
+    } catch (error) {
+      logger.error(`Failed to update game document ${gameId} with challenge data:`, error);
+      // Still return the challenge object if the client needs it, but log the persistence error.
+      // Depending on requirements, this could throw an HttpsError to indicate failure to the client.
+      // For now, let's assume the client might still want the challenge even if DB update fails,
+      // but this is a design decision.
+      // For a stricter approach, uncomment the throw below:
+      // throw new HttpsError("internal", "Failed to save challenge data to the game.", error);
+    }
+
+    // 7. Return the assembled challenge object.
+    return challenge;
+  }
+);
 
 
 export const getGuildDetails = functions.https.onCall(async (request) => {
