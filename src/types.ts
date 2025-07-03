@@ -98,6 +98,74 @@ export interface Game {
   // guildTag?: string;
 }
 
+// =================================================================
+//            MINI-GAME CHALLENGE PREPARATION TYPES
+// =================================================================
+
+/**
+ * Input data for the prepareMiniGameChallenge Cloud Function.
+ */
+export interface PrepareMiniGameChallengeRequest {
+  gameId: string;
+  miniGameType: string; // e.g., "festinDesMots", "syllablePuzzle", "colorChaos"
+  difficulty: "très facile" | "moyen" | "difficile" | "extrême"; // Difficulty levels
+}
+
+/**
+ * Structure of the challenge data to be stored in the game document
+ * (e.g., in `games/{gameId}.currentChallengeData`).
+ */
+export interface MiniGameChallenge {
+  questionText?: string;    // e.g., "Translate: Kimchi" or "What color is this word?"
+  questionImageUrl?: string; // URL for an image-based question (e.g., show image of Kimchi)
+  questionAudioUrl?: string; // URL for an audio-based question (e.g., play pronunciation of 김치)
+  correctAnswer: string;    // The correct Hangeul word, color name, etc.
+  distractors: string[];    // Array of other Hangeul words, incorrect color names, etc.
+  challengeType: string;    // To help client render, e.g., "VOCAB_TRANSLATE_FR_KO", "VOCAB_IMAGE_TO_KO", "COLOR_WORD_MATCH"
+  answerDetails: {          // Details about the correct answer item (especially for vocab)
+    hangeul?: string;
+    french_name?: string;
+    category?: string;
+    cefrLevel?: string; // Assumed for now
+    imageUrl?: string;
+    audioUrl?: string;
+    // Add other relevant fields from the source content item
+  };
+}
+
+/**
+ * Represents a generic content item from collections like foodItemDefinitions, spellDefinitions etc.
+ * This interface should be compatible with the structure of items in those collections.
+ */
+export interface ContentItem {
+  id?: string; // Firestore document ID
+  hangeul?: string; // For vocab items
+  french_name?: string; // For vocab items
+  category?: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  cefrLevel?: string; // ASSUMPTION: Content items have a CEFR level, e.g., "A1", "A2"
+  // Add other fields that might exist in various content definition files
+  // For example, for colorChaos, it might be:
+  word?: string; // The word to display (e.g., "ROUGE")
+  colorHex?: string; // The hex code of the color to display the word in (e.g., "#00FF00" for green)
+  correctColorName?: string; // The actual name of the color of the text (e.g., "Vert")
+}
+
+/**
+ * Extends UserProfile to include the player's global CEFR level.
+ */
+export interface UserProfileWithCEFR extends UserProfile {
+  playerCefrLevel?: string; // ASSUMPTION: User profile has a global CEFR level, e.g., "A1", "A2"
+}
+
+/**
+ * Extends SpellMasteryItem to include CEFR level, if available.
+ */
+export interface SpellMasteryItemWithCEFR extends SpellMasteryItem {
+  cefrLevel?: string; // ASSUMPTION: Mastery items might store the CEFR level of the word
+}
+
 // Represents a member of a Guild within the Guild document
 export interface GuildMemberDetail {
   role: string; // e.g., "master", "member", "officer"
